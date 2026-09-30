@@ -1,0 +1,936 @@
+// The explorable route: tile-grid movement on a foreshortened (32 x 24) grid,
+// collisions, tall-grass encounters, Elite Trainers, Solaces (healing stops), items, lore
+// and the Elite Hall entrance. Lighting/weather live in AtmosphereScene; the
+// HUD and menus in OverworldUIScene.
+import Phaser from 'phaser';
+import { TILE_W, TILE_H, WORLD_ZOOM, CHAR_SCALE, ART_SCALE, ENCOUNTER_RATE, WALK_MS, RUN_MS } from '../config.js';
+import { TRAINER_SPOTS, MAP_ITEMS, HALL, OUTDOOR_W, CHECKPOINTS } from '../data/map.js';
+import tilesMeta from '../data/tiles.json' with { type: 'json' };
+import { TRAINERS } from '../data/trainers.js';
+import { personality } from '../data/personalities.js';
+import { zoneAt, poolFor } from '../data/encounters.js';
+import { ITEMS, WILD_DROP_CHANCE } from '../data/items.js';
+import { buildMap } from '../systems/mapBuilder.js';
+import { getSave, writeSave, loadSave } from '../systems/save.js';
+import { createCreature, fullRestore } from '../systems/creature.js';
+import { awardTrainer } from '../systems/score.js';
+import { trainerName } from '../systems/teams.js';
+import { isNight } from '../systems/world.js';
+import { warning, objective } from '../systems/advice.js';
+import { unlockCheckpoints, nearestCheckpoint } from '../systems/checkpoints.js';
+import { sfx, music } from '../systems/audio.js';
+import { TRACKS } from '../data/music.js';
+import { trainerArt } from '../ui/trainerArt.js';
+import { looseRng } from '../systems/rng.js';
+import { heldDirection, isHeld, pushFocusToken } from '../systems/controls.js';
+import { wait } from '../ui/helpers.js';
+
+const DELTA = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+
+/** Each Elite has their own encounter + battle theme, keyed by character design
+ *  (the route order is shuffled per player). Falls back to the generic themes. */
+function themeFor(kind, design) {
+  const key = `${kind}_${design}`;
+  if (TRACKS[key]) return key;
+  return kind === 'encounter' ? 'eliteEncounter' : 'eliteBattle';
+}
+const ROWS = ['down', 'left', 'right', 'up'];
+const WARM = 0xffd38a;
+
+export class OverworldScene extends Phaser.Scene {
+  constructor() { super('Overworld'); }
+
+  create() {
+    this.save = getSave() ?? loadSave();
+    if (!this.save) { this.scene.start('Title'); return; }
+    this.map = buildMap();
+    this.moving = false;
+    this.locked = false;
+    this.turnUntil = 0;
+    this.lastMoveEnd = 0;
+    this.bumpCooldown = 0;
+
+    // ground
+    // (tiles are painted at ART_SCALE texels per world unit; the layer is scaled
+    // back to world units so 1 texel = 1 screen pixel under the 2x camera)
+    const TWt = TILE_W * ART_SCALE;
+    const THt = TILE_H * ART_SCALE;
+    const tm = this.make.tilemap({ data: this.map.indices, tileWidth: TWt, tileHeight: THt });
+    const ts = tm.addTilesetImage('tileset', 'tileset', TWt, THt, 0, 0);
+    this.layer = tm.createLayer(0, ts, 0, 0).setDepth(-10).setScale(1 / ART_SCALE);
+    const wA = tilesMeta.tiles.water.index;
+    const wB = tilesMeta.tiles.water2.index;
+    this.time.addEvent({ delay: 650, loop: true, callback: () => this.layer.swapByIndex(wA, wB) });
+
+    // props (y-sorted by their base). 3D renders; each sprite's anchor pixel is
+    // the footprint's bottom-left ground corner (see tools/props3d.py).
+    this.lights = [];
+    this.aisle = [];            // the Hall's braziers, lit pair by pair on the final walk
+    for (const p of this.map.props) {
+      const bx = p.x * TILE_W;
+      const by = (p.y + p.h) * TILE_H;
+      const m = tilesMeta.props[p.type];
+      const img = this.add.image(bx, by, p.type).setOrigin(m.ax / m.w, m.ay / m.h).setDepth(p.deco ? -5 : by).setScale(1 / ART_SCALE);
+      let pair = null;
+      if (p.aisle != null) {
+        // the bowl stays the cold model; fire is an animated sprite on top (see ignite)
+        img.setTexture('brazier_cold');
+        const fx = bx + (36.5 - tilesMeta.props.brazier_cold.ax) / ART_SCALE;
+        const fy = by - 38;
+        pair = { img, fx, fy, flame: null, lights: [{ x: fx, y: fy - 6, r: 30, color: 0xffa040, off: true }] };
+        this.lights.push(pair.lights[0]);
+        (this.aisle[p.aisle] ??= []).push(pair);
+      }
+      // merge emissive blobs that sit close together (a row of window panes
+      // reads as one soft pool of light, not a stack of additive blobs)
+      const merged = [];
+      for (const [lx, ly, area, col] of m.lights ?? []) {
+        const c = Phaser.Display.Color.HexStringToColor(col);
+        // blue glass = house windows -> warm interior light at night
+        const color = c.blue > c.red + 20 && p.type !== 'hall' ? WARM : c.color;
+        const near = merged.find((q) => q.color === color && Math.abs(q.x - lx) < 18 * ART_SCALE && Math.abs(q.y - ly) < 14 * ART_SCALE);
+        if (near) {
+          const a = near.area + area;
+          near.x = (near.x * near.area + lx * area) / a;
+          near.y = (near.y * near.area + ly * area) / a;
+          near.area = a;
+        } else merged.push({ x: lx, y: ly, area, color });
+      }
+      for (const q of merged) {
+        const area = q.area / (ART_SCALE * ART_SCALE);          // texels -> world units
+        const light = { x: bx + q.x / ART_SCALE, y: by + q.y / ART_SCALE, r: Math.min(28, 7 + Math.sqrt(area) * 1.8), color: q.color };
+        this.lights.push(light);
+        pair?.lights.push(light);
+      }
+    }
+
+    // map items
+    this.itemAt = new Map();
+    this.itemSprites = new Map();
+    const picked = new Set(this.save.pickedItems);
+    for (const it of MAP_ITEMS) {
+      if (picked.has(it.id)) continue;
+      this.itemAt.set(this.map.key(it.x, it.y), it);
+      if (!it.hidden) {
+        const m = tilesMeta.props.item_ball;
+        const by = (it.y + 1) * TILE_H;
+        const s = this.add.image(it.x * TILE_W, by, 'item_ball').setOrigin(m.ax / m.w, m.ay / m.h).setDepth(by).setScale(1 / ART_SCALE);
+        this.tweens.add({ targets: s, y: by - 2, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        this.itemSprites.set(it.id, s);
+      }
+    }
+    this.time.addEvent({ delay: 2600, loop: true, callback: () => this.sparkleHidden() });
+
+    // trainers
+    this.npcAt = new Map();
+    this.npcSprites = {};
+    for (const [id, spot] of Object.entries(TRAINER_SPOTS)) this.placeTrainer(id, spot);
+
+    // player (+ soft contact shadow)
+    const { x, y, facing } = this.save.pos;
+    this.pos = { x, y };
+    this.facing = facing ?? 'down';
+    this.gender = this.save.player.gender;
+    this.shadow = this.add.ellipse(0, 0, 22, 8, 0x0b1020, 0.28);
+    this.player = this.add.sprite(0, 0, `player_${this.gender}`, this.idleFrame(this.facing)).setOrigin(0.5, 1).setScale(CHAR_SCALE);
+    this.buildGrass();
+    this.syncPlayer();
+    this.buildHallDust();
+    this.hallReset();
+    this.unlockCheckpoints();
+
+    const cam = this.cameras.main;
+    cam.setZoom(WORLD_ZOOM).setRoundPixels(true);
+    cam.startFollow(this.player, true, 1, 1, 0, TILE_H / 2);
+    this.applyArea();
+    cam.fadeIn(500);
+
+    this.scene.launch('Atmosphere');
+    this.scene.launch('OverworldUI');
+    this.ui = this.scene.get('OverworldUI');
+    this.focus = pushFocusToken((a) => this.onAction(a), this);
+    // Scene event emitters survive restarts, so detach on shutdown to avoid
+    // handling one battle result twice after coming back from the Hall of Fame.
+    const onResume = (_sys, data) => this.onBattleEnd(data);
+    this.events.on('resume', onResume);
+    this.events.once('shutdown', () => {
+      this.events.off('resume', onResume);
+      this.scene.stop('OverworldUI');
+      this.scene.stop('Atmosphere');
+    });
+    this.zoneId = null;
+    this.time.delayedCall(600, () => this.checkZone());
+    this.time.delayedCall(50, () => this.applyArea());      // (re)applies the Hall's cinema bars once the UI exists
+    this.nightMusic = null;
+    this.updateMusic(true);
+  }
+
+  // ------------------------------------------------------------------ helpers
+  idleFrame(dir) { return ROWS.indexOf(dir) * (this.registry.get('playerFrames') ?? 7); }
+
+  /** 3D tall grass: every encounter tile gets a back half (behind whoever
+   *  stands on it) and a front half (over their legs); short grass gets a few
+   *  scattered 3D tufts. */
+  buildGrass() {
+    this.tallFront = new Map();
+    this.grassSprites = [];
+    const hash = (x, y) => ((x * 73856093) ^ (y * 19349663)) >>> 0;
+    const place = (key, x, y, depth) => {
+      const m = tilesMeta.props[key];
+      return this.add.image(x * TILE_W, (y + 1) * TILE_H, key).setOrigin(m.ax / m.w, m.ay / m.h)
+        .setScale(1 / ART_SCALE).setDepth(depth);
+    };
+    for (let y = 0; y < this.map.h; y++) {
+      for (let x = 0; x < this.map.w; x++) {
+        const h = hash(x, y);
+        if (this.map.isEncounter(x, y)) {
+          const v = h % 4;
+          const back = place(`tall_back${v}_1`, x, y, y * TILE_H + TILE_H / 2);
+          const front = place(`tall_front${v}_1`, x, y, y * TILE_H + TILE_H - 0.5);
+          this.tallFront.set(this.map.key(x, y), front);
+          this.grassSprites.push({ x, y, v, back, front, f: 1 });
+        } else if (this.map.ground[y][x] === 'grass' && !this.map.blocked[y][x] && h % 100 < 9) {
+          place(`clump${h % 3}`, x, y, y * TILE_H + TILE_H - 3);
+        }
+      }
+    }
+    // wind: waves roll across the field (three bend frames per blade tile)
+    this.time.addEvent({ delay: 220, loop: true, callback: () => this.windTick() });
+    // something moves in the grass nearby
+    this.time.addEvent({ delay: 1500, loop: true, callback: () => this.lurk() });
+  }
+
+  setGrassFrame(g, f) {
+    if (g.f === f) return;
+    g.f = f;
+    for (const [img, layer] of [[g.back, 'back'], [g.front, 'front']]) {
+      const key = `tall_${layer}${g.v}_${f}`;
+      const m = tilesMeta.props[key];
+      img.setTexture(key).setOrigin(m.ax / m.w, m.ay / m.h);
+    }
+  }
+
+  windTick() {
+    const view = this.cameras.main.worldView;
+    const t = this.time.now / 1000;
+    const gust = 0.55 + 0.45 * Math.sin(t * 0.37);           // gusts come and go
+    for (const g of this.grassSprites) {
+      const px = g.x * TILE_W;
+      const py = g.y * TILE_H;
+      if (px < view.x - 64 || px > view.right + 32 || py < view.y - 48 || py > view.bottom + 48) continue;
+      const w = Math.sin(g.x * 0.55 - g.y * 0.22 - t * 2.4) * gust;
+      this.setGrassFrame(g, w > 0.42 ? 2 : w < -0.55 ? 0 : 1);
+    }
+  }
+
+  /** A random patch of tall grass near the player rustles on its own; at
+   *  night, sometimes a pair of eyes blinks in it. */
+  lurk() {
+    if (this.locked || !this.grassSprites.length) return;
+    const near = this.grassSprites.filter((g) => Math.abs(g.x - this.pos.x) <= 5 && Math.abs(g.y - this.pos.y) <= 4
+      && !(g.x === this.pos.x && g.y === this.pos.y));
+    if (!near.length || !looseRng.chance(0.7)) return;
+    const g = near[looseRng.int(0, near.length - 1)];
+    this.rustle(g.x, g.y);
+    if (isNight(this.save.stats.playMs) && looseRng.chance(0.35)) {
+      const f = this.tileFoot(g.x, g.y);
+      const col = looseRng.pick([0xffe066, 0xff5a5a, 0x9dff7a]);
+      const eyes = [-2.5, 2.5].map((dx) => this.add.ellipse(f.x + dx, f.y - 9, 2.2, 1.4, col, 1)
+        .setBlendMode(Phaser.BlendModes.ADD).setDepth(f.y + 0.2).setAlpha(0));
+      this.tweens.add({ targets: eyes, alpha: 1, duration: 160, yoyo: true, hold: 700, onComplete: () => eyes.forEach((e) => e.destroy()) });
+      this.tweens.add({ targets: eyes, scaleY: 0.1, duration: 70, yoyo: true, delay: 420 });
+    }
+  }
+
+  /** Grass parts around the player's feet. */
+  rustle(x, y) {
+    const g = this.tallFront.get(this.map.key(x, y));
+    if (!g) return;
+    this.tweens.killTweensOf(g);
+    const x0 = x * TILE_W;
+    g.setScale(1 / ART_SCALE).setX(x0);
+    this.tweens.add({ targets: g, scaleY: 0.82 / ART_SCALE, scaleX: 1.06 / ART_SCALE, duration: 90, yoyo: true, ease: 'Sine.easeOut' });
+    this.tweens.add({ targets: g, x: { from: x0 - 1.2, to: x0 + 1.2 }, duration: 55, yoyo: true, repeat: 2, onComplete: () => g.setX(x0) });
+    const f = this.tileFoot(x, y);
+    for (let i = 0; i < 3; i++) {
+      const leaf = this.add.rectangle(f.x + looseRng.int(-8, 8), f.y - 6, 2, 1, 0x9be07a).setDepth(f.y + 2);
+      this.tweens.add({ targets: leaf, x: leaf.x + looseRng.int(-10, 10), y: leaf.y - looseRng.int(6, 12), alpha: 0, angle: 180, duration: 420, ease: 'Sine.easeOut', onComplete: () => leaf.destroy() });
+    }
+  }
+
+  tileFoot(x, y) { return { x: x * TILE_W + TILE_W / 2, y: y * TILE_H + TILE_H - 2 }; }
+
+  syncPlayer() {
+    const f = this.tileFoot(this.pos.x, this.pos.y);
+    this.player.setPosition(f.x, f.y);
+    this.player.setDepth(this.player.y + 0.5);
+    this.shadow.setPosition(f.x, f.y - 1).setDepth(this.player.depth - 0.2);
+  }
+
+  placeTrainer(id, spot) {
+    const defeated = this.save.defeated[id];
+    const at = defeated && spot.moved ? spot.moved : spot;
+    const design = this.save.teams[id].design;
+    this.npcSprites[id]?.destroy();
+    this.npcSprites[`${id}_shadow`]?.destroy();
+    for (const [k, v] of this.npcAt) if (v === id) this.npcAt.delete(k);
+    const art = trainerArt(design).overworld;
+    const f = this.tileFoot(at.x, at.y);
+    this.npcSprites[`${id}_shadow`] = this.add.ellipse(f.x, f.y - 1, 22, 8, 0x0b1020, 0.28).setDepth(f.y - 0.5);
+    const s = this.add.sprite(f.x, f.y, art.key, art.frame).setOrigin(0.5, 1).setScale(CHAR_SCALE);
+    s.setDepth(s.y);
+    s.anims.play({ key: art.anim, startFrame: looseRng.int(0, 4) });
+    this.npcSprites[id] = s;
+    this.npcAt.set(this.map.key(at.x, at.y), id);
+  }
+
+  walkable(x, y) {
+    if (x < 0 || y < 0 || x >= this.map.w || y >= this.map.h) return false;
+    const k = this.map.key(x, y);
+    return !this.map.blocked[y][x] && !this.npcAt.has(k) && !this.itemAt.has(k);
+  }
+
+  face(dir) {
+    this.facing = dir;
+    this.player.anims.stop();
+    this.player.setFrame(this.idleFrame(dir));
+  }
+
+  updateMusic(force = false) {
+    if (this.indoors) {
+      if (force) music(this.hallTrack());
+      return;
+    }
+    const night = isNight(this.save.stats.playMs);
+    if (force || night !== this.nightMusic) {
+      this.nightMusic = night;
+      music(night ? 'night' : 'day');
+    }
+  }
+
+  // ------------------------------------------------------------------- update
+  update(time) {
+    if (!this.save) return;
+    if (!this.locked) this.updateMusic();
+    if (this.moving || this.locked || !this.focus.isTop()) return;
+    const dir = heldDirection();
+    if (!dir) {
+      if (Number(this.player.frame.name) !== this.idleFrame(this.facing)) this.face(this.facing);
+      return;
+    }
+    const continuing = time - this.lastMoveEnd < 60;
+    if (dir !== this.facing) {
+      this.face(dir);
+      if (!continuing) { this.turnUntil = time + 90; return; }
+    }
+    if (time < this.turnUntil) return;
+    this.tryStep(dir);
+  }
+
+  tryStep(dir) {
+    const [dx, dy] = DELTA[dir];
+    const nx = this.pos.x + dx;
+    const ny = this.pos.y + dy;
+    if (!this.walkable(nx, ny)) {
+      this.face(dir);
+      if (this.time.now > this.bumpCooldown) {
+        this.bumpCooldown = this.time.now + 350;
+        if (!this.interactAt(nx, ny, true)) sfx('bump');
+      }
+      return;
+    }
+    this.moving = true;
+    // the Hall before Cooker falls: no running, a slower, heavier step
+    const tense = this.indoors && !this.save.defeated.cooker;
+    const running = !tense && isHeld('run');
+    const WALK = tense ? WALK_MS * 1.45 : WALK_MS;
+    // Frames are locked to the tile step, like the handheld games: each tile is
+    // one step (alternating feet); running shows contact then airborne frames.
+    this.stepParity = !this.stepParity;
+    const row = ROWS.indexOf(dir) * (this.registry.get('playerFrames') ?? 7);
+    const seq = running
+      ? (this.stepParity ? [3, 4] : [5, 6])
+      : (this.stepParity ? [1, 0] : [2, 0]);
+    this.player.anims.stop();
+    this.player.setFrame(row + seq[0]);
+    const dur = running ? RUN_MS : WALK;
+    const t0 = this.time.now;
+    if (this.map.isEncounter(nx, ny)) {
+      // the rustle starts as you push in, the blades shake mid-stride
+      sfx('grass', { run: running });
+      this.time.delayedCall(dur * 0.5, () => this.rustle(nx, ny));
+    }
+    const f = this.tileFoot(nx, ny);
+    this.tweens.add({
+      targets: this.player,
+      x: f.x,
+      y: f.y,
+      duration: dur,
+      onUpdate: () => {
+        const k = (this.time.now - t0) / dur;
+        this.player.setFrame(row + seq[k < (running ? 0.5 : 0.55) ? 0 : 1]);
+        this.player.setDepth(this.player.y + 0.5);
+        this.shadow.setPosition(this.player.x, this.player.y - 1).setDepth(this.player.depth - 0.2);
+      },
+      onComplete: () => {
+        this.pos = { x: nx, y: ny };
+        this.moving = false;
+        this.lastMoveEnd = this.time.now;
+        this.syncPlayer();
+        this.afterStep();
+      },
+    });
+  }
+
+  afterStep() {
+    const s = this.save;
+    s.pos = { x: this.pos.x, y: this.pos.y, facing: this.facing };
+    if (this.indoors) {
+      if (this.pos.x === HALL.exit.x && this.pos.y === HALL.exit.y) { this.runLocked(() => this.warp(HALL.out)); return; }
+      if (this.hallStep()) return;
+    }
+    s.stats.steps += 1;
+    this.unlockCheckpoints();
+    if (s.stats.steps % 25 === 0) writeSave();
+    this.checkZone();
+    if (this.map.isEncounter(this.pos.x, this.pos.y) && looseRng.chance(ENCOUNTER_RATE)) this.startWild();
+  }
+
+  checkZone() {
+    const z = zoneAt(this.pos.y, this.pos.x);
+    if (z.id !== this.zoneId) {
+      this.zoneId = z.id;
+      this.ui.showZone?.(z.name);
+    }
+  }
+
+  sparkleHidden() {
+    const view = this.cameras.main.worldView;
+    for (const it of this.itemAt.values()) {
+      if (!it.hidden || !looseRng.chance(0.55)) continue;
+      const f = this.tileFoot(it.x, it.y);
+      if (!view.contains(f.x, f.y)) continue;
+      const s = this.add.image(f.x + looseRng.int(-5, 5), f.y - 8, 'spark').setDepth(f.y + 1).setScale(0.2).setAlpha(0.95);
+      this.tweens.add({ targets: s, scale: 0.9, angle: 90, alpha: 0, duration: 650, ease: 'Sine.easeOut', onComplete: () => s.destroy() });
+    }
+  }
+
+  // -------------------------------------------------------------- interaction
+  onAction(a) {
+    if (this.locked || this.moving) return;
+    if (a === 'confirm') {
+      const [dx, dy] = DELTA[this.facing];
+      this.interactAt(this.pos.x + dx, this.pos.y + dy, false);
+    } else if (a === 'menu') {
+      sfx('open');
+      this.runLocked(() => this.ui.pauseMenu());
+    }
+  }
+
+  async runLocked(fn) {
+    this.locked = true;
+    this.player.anims.stop();
+    this.player.setFrame(this.idleFrame(this.facing));
+    try { await fn(); } finally { this.locked = false; }
+    this.ui.refreshHud();
+  }
+
+  /** Returns true when something handled the interaction. */
+  interactAt(x, y, bumped) {
+    const k = this.map.key(x, y);
+    const trainerId = this.npcAt.get(k);
+    if (trainerId) { this.runLocked(() => this.talkTrainer(trainerId)); return true; }
+    const item = this.itemAt.get(k);
+    if (item && (!bumped || !item.hidden)) { this.runLocked(() => this.pickItem(item)); return true; }
+    const door = this.map.doors.get(k);
+    if (door && (bumped ? this.facing === 'up' : true)) { this.runLocked(() => this.enterDoor(door)); return true; }
+    if (x === HALL.gate.x && y === HALL.gate.y && this.facing === 'up') { this.runLocked(() => this.hallGate()); return true; }
+    if (bumped) return false;
+    const sign = this.map.signs.get(k);
+    if (sign) { sfx('confirm'); this.runLocked(() => this.ui.say(sign.split('\n').join(' '), { speaker: 'SIGN' })); return true; }
+    const lore = this.map.lore.get(k);
+    if (lore) { sfx('confirm'); this.runLocked(() => this.ui.say(lore)); return true; }
+    return false;
+  }
+
+  async pickItem(item) {
+    const def = ITEMS[item.item];
+    this.itemAt.delete(this.map.key(item.x, item.y));
+    const spr = this.itemSprites.get(item.id);
+    if (spr) {
+      this.tweens.killTweensOf(spr);
+      this.tweens.add({ targets: spr, y: spr.y - 16, alpha: 0, duration: 260, onComplete: () => spr.destroy() });
+    }
+    this.save.pickedItems.push(item.id);
+    this.save.bag[item.item] = (this.save.bag[item.item] ?? 0) + 1;
+    writeSave();
+    sfx('item');
+    await this.ui.say(`${this.save.player.name} found ${/^[AEIOU]/i.test(def.name) ? 'an' : 'a'} ${def.name.toUpperCase()}!`, { banner: def.name });
+  }
+
+  async talkTrainer(id, { noticed = false } = {}) {
+    const s = this.save;
+    const name = trainerName(s.teams, id).toUpperCase();
+    const design = s.teams[id].design;
+    const portrait = `trainer_${design}_battle`;
+    const voice = personality(design);
+    if (s.defeated[id]) {
+      // what they think of you now, plus where to head next
+      await this.ui.say([...voice.after, ...(id === 'cooker' ? [] : objective(s))], { speaker: name, portrait });
+      return;
+    }
+    if (!noticed) {
+      sfx('spotted');
+      music(id === 'cooker' ? 'cookerEncounter' : themeFor('encounter', design));
+      await this.exclaim(this.npcSprites[id]);
+    }
+    // the road-block Elite won't fight until the side-path Elites are beaten
+    const missing = (TRAINERS[id].requires ?? []).filter((r) => !s.defeated[r]);
+    if (missing.length) {
+      const names = missing.map((r) => trainerName(s.teams, r));
+      const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+      const lines = voice.blocked.map((l) => l.replace('{LIST}', list).replace('{VERB}', names.length > 1 ? 'are' : 'is'));
+      await this.ui.say(lines, { speaker: name, portrait });
+      this.updateMusic(true);
+      return;
+    }
+    await this.ui.say(s.stats.lostTo?.[id] ? voice.rematch : voice.intro, { speaker: name, portrait });
+    // under-levelled (or not evolved for the Hall)? They tell you, and let you back out
+    const warn = warning(s, id, design);
+    if (warn.length) {
+      await this.ui.say(warn, { speaker: name, portrait });
+      const pick = await this.ui.ask(voice.ask, ['BATTLE', 'NOT YET'], { speaker: name, portrait });
+      if (pick !== 0) {
+        await this.ui.say(voice.wait, { speaker: name, portrait });
+        if (id === 'cooker') await this.leaveHall();
+        else this.updateMusic(true);
+        return;
+      }
+    }
+    if (id === 'cooker') {
+      sfx('flare');
+      this.cameras.main.flash(260, 255, 244, 220);
+      this.cameras.main.shake(520, 0.01);
+      await wait(this, 420);
+    }
+    await this.startBattle({ kind: 'trainer', trainerId: id });
+  }
+
+  async exclaim(target) {
+    const bubble = this.add.image(target.x, target.y - target.displayHeight - 6, 'exclaim').setOrigin(0.5, 1).setDepth(100000).setScale(0.2);
+    this.tweens.add({ targets: bubble, scale: 1, duration: 180, ease: 'Back.easeOut' });
+    await wait(this, 700);
+    bubble.destroy();
+  }
+
+  async enterDoor(door) {
+    if (door.kind === 'rest') {
+      const cam = this.cameras.main;
+      sfx('door');
+      cam.fadeOut(250);
+      await wait(this, 300);
+      fullRestore(this.save.party[0]);
+      this.save.respawn = { x: door.x, y: door.y + 1, facing: 'down' };
+      const cp = CHECKPOINTS.find((c) => c.near && c.x === door.x && c.y === door.y + 1);
+      if (cp && !this.save.checkpoints.includes(cp.id)) this.save.checkpoints.push(cp.id);
+      writeSave();
+      cam.fadeIn(250);
+      sfx('heal');
+      await this.ui.say(['Welcome to the Solace!', 'Your partner is fully rested. Stop by any time.', '(Game saved. You will wake up here if you black out.)'], { speaker: 'SOLACE' });
+      const [first, ...more] = objective(this.save);
+      await this.ui.say([`Word around the Solace: ${first}`, ...more], { speaker: 'SOLACE' });
+      return;
+    }
+    if (door.kind === 'house') {
+      const lore = this.map.lore.get(this.map.key(door.x, door.y));
+      await this.ui.say(lore ?? looseRng.pick(["It's locked. Nobody seems to be home.", 'The door is locked.', 'You hear a TV inside, but nobody answers.', 'A dog barks from somewhere inside. The door stays shut.']));
+      return;
+    }
+    // Elite Hall: sealed until the four route Elites are beaten, then the
+    // doors open onto the Hall itself, where Cooker waits.
+    const missing = ['t1', 't2', 't3', 't4'].filter((id) => !this.save.defeated[id]);
+    if (missing.length) {
+      sfx('bump');
+      const names = missing.map((id) => trainerName(this.save.teams, id));
+      await this.ui.say(`Four crests are set into the doors. ${4 - missing.length} of them glow.`);
+      await this.ui.say(`Still dark: ${names.join(', ')}.`);
+      return;
+    }
+    sfx('door');
+    this.hallReset();
+    await this.warp(HALL.entry);
+    if (!this.save.defeated.cooker) {
+      // the doors slam behind you; the Hall is dark
+      sfx('hallDoors');
+      this.cameras.main.shake(420, 0.004);
+      this.dustBurst(26);
+      // no narration in here: the dark and the braziers tell it
+    }
+  }
+
+  /** Teleport (fade out / in) to a tile; the camera clamps to that area. */
+  async warp(to) {
+    const cam = this.cameras.main;
+    cam.fadeOut(260, 0, 0, 0);
+    await wait(this, 280);
+    this.pos = { x: to.x, y: to.y };
+    this.facing = to.facing ?? this.facing;
+    this.face(this.facing);
+    this.syncPlayer();
+    this.applyArea();
+    this.save.pos = { ...this.pos, facing: this.facing };
+    this.checkZone();
+    this.updateMusic(true);
+    cam.fadeIn(300, 0, 0, 0);
+    await wait(this, 300);
+  }
+
+  /** Outdoors vs the Hall interior: camera bounds, backdrop, lighting flag. */
+  applyArea() {
+    const cam = this.cameras.main;
+    this.indoors = this.pos.x >= OUTDOOR_W;
+    if (this.indoors) {
+      cam.setBounds(HALL.x0 * TILE_W, HALL.y0 * TILE_H, (HALL.x1 - HALL.x0 + 1) * TILE_W, (HALL.y1 - HALL.y0 + 2) * TILE_H);
+      cam.setBackgroundColor('#08080f');
+    } else {
+      cam.setBounds(0, 0, OUTDOOR_W * TILE_W, this.map.h * TILE_H);
+      cam.setBackgroundColor('#2c6a3a');
+    }
+    const tense = this.indoors && !this.save.defeated.cooker;
+    this.ui?.cinema?.(tense);
+    if (this.hallDust) this.hallDust.emitting = this.indoors;
+  }
+
+  /** Cooker spots you on the carpet, walks down to meet you, and talks. */
+  cookerApproach() {
+    this.cookerMet = true;
+    this.runLocked(async () => {
+      const spr = this.npcSprites.cooker;
+      const shadow = this.npcSprites.cooker_shadow;
+      // every flame in the Hall flares at once, and there he is
+      music(null);
+      const cam = this.cameras.main;
+      cam.stopFollow();
+      await new Promise((res) => cam.pan(spr.x, spr.y + 40, 900, 'Sine.easeInOut', false, (_c, t) => { if (t === 1) res(); }));
+      await wait(this, 400);
+      this.ignite(3, { flare: true });
+      spr.clearTint();
+      await wait(this, 900);
+      sfx('spotted');
+      music('cookerEncounter');
+      await this.exclaim(spr);
+      const col = TRAINER_SPOTS.cooker.x;
+      let cy = TRAINER_SPOTS.cooker.y;
+      const stopY = Math.max(cy, this.pos.y - 2);      // face-off distance
+      this.npcAt.delete(this.map.key(col, cy));
+      while (cy < stopY && !(col === this.pos.x && cy + 1 === this.pos.y)) {
+        cy += 1;
+        const f = this.tileFoot(col, cy);
+        sfx('footstep');
+        await new Promise((res) => this.tweens.add({
+          targets: [spr], x: f.x, y: f.y, duration: 260, ease: 'Sine.easeInOut',
+          onUpdate: () => { spr.setDepth(spr.y); shadow?.setPosition(spr.x, spr.y - 1).setDepth(spr.y - 0.5); },
+          onComplete: res,
+        }));
+      }
+      this.npcAt.set(this.map.key(col, cy), 'cooker');
+      // back to the player
+      await new Promise((res) => cam.pan(this.player.x, this.player.y - TILE_H / 2, 500, 'Sine.easeInOut', false, (_c, t) => { if (t === 1) res(); }));
+      cam.startFollow(this.player, true, 1, 1, 0, TILE_H / 2);
+      // turn to face Cooker
+      const dir = col < this.pos.x ? 'left' : col > this.pos.x ? 'right' : 'up';
+      this.face(dir);
+      await wait(this, 250);
+      await this.talkTrainer('cooker', { noticed: true });
+    });
+  }
+
+  /** Unlock checkpoints: Elites you've beaten, Solaces you've reached. */
+  unlockCheckpoints() {
+    unlockCheckpoints(this.save, this.indoors ? null : this.pos);
+  }
+
+  nearestCheckpoint(from) {
+    return nearestCheckpoint(this.map, this.save.checkpoints, from);
+  }
+
+  hallTrack() {
+    if (this.save.defeated.cooker) return 'hof';
+    if (this.cookerMet) return 'cookerEncounter';
+    return this.hallStage >= 2 ? 'hallWalk2' : 'hallWalk';
+  }
+
+  /** The Hall as you find it: cold braziers, dark, Cooker a silhouette on the dais
+   *  (or, once he's beaten, every flame burning). */
+  hallReset() {
+    const lit = !!this.save.defeated.cooker;
+    this.hallStage = 0;
+    this.hallLight = lit ? 1 : 0.18;
+    this.aisle.forEach((pair) => pair?.forEach((b) => this.setFlame(b, lit)));
+    const ck = this.npcSprites.cooker;
+    if (ck) { if (lit) ck.clearTint(); else ck.setTint(0x2a2238); }
+  }
+
+  /** Light (or put out) one brazier: a flickering flame, embers and its light pool. */
+  setFlame(b, on) {
+    b.lights.forEach((l) => { l.off = !on; });
+    if (!on) { b.flame?.forEach((o) => o.destroy()); b.flame = null; return; }
+    if (b.flame) return;
+    if (!this.textures.exists('flame')) makeFlameTexture(this);
+    const d = b.img.depth + 0.5;
+    const halo = this.add.image(b.fx, b.fy - 6, 'glow').setBlendMode(Phaser.BlendModes.ADD).setTint(0xff9a40).setScale(0.32).setAlpha(0.55).setDepth(d);
+    const outer = this.add.image(b.fx, b.fy + 2, 'flame').setOrigin(0.5, 1).setScale(0.5).setDepth(d).setTint(0xff8a30);
+    const inner = this.add.image(b.fx, b.fy + 2, 'flame').setOrigin(0.5, 1).setScale(0.3, 0.32).setDepth(d + 0.1).setTint(0xfff0b0);
+    const flick = (img, sx, sy) => this.tweens.add({
+      targets: img, scaleX: { from: sx * 0.9, to: sx * 1.08 }, scaleY: { from: sy * 0.82, to: sy * 1.12 },
+      duration: looseRng.int(120, 190), yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: looseRng.int(0, 150),
+    });
+    flick(outer, 0.5, 0.5); flick(inner, 0.3, 0.32);
+    this.tweens.add({ targets: halo, alpha: 0.35, scale: 0.36, duration: 260, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    const embers = this.add.particles(b.fx, b.fy - 10, 'spark', {
+      x: { min: -3, max: 3 }, speedY: { min: -26, max: -12 }, speedX: { min: -5, max: 5 }, lifespan: { min: 600, max: 1100 },
+      scale: { start: 0.06, end: 0 }, alpha: { start: 0.9, end: 0 }, tint: [0xffc060, 0xff7a30], frequency: 220, blendMode: 'ADD',
+    }).setDepth(d + 0.2);
+    b.flame = [halo, outer, inner, embers];
+  }
+
+  /** Light aisle pair n (3 = the dais pair; flare = every flame at once). */
+  ignite(n, { flare = false } = {}) {
+    const pairs = flare ? this.aisle.map((_, i) => i) : [n];
+    sfx(flare ? 'flare' : 'ignite');
+    for (const i of pairs) {
+      for (const b of this.aisle[i] ?? []) {
+        const wasCold = !b.flame;
+        this.setFlame(b, true);
+        if (!wasCold && !flare) continue;
+        const burst = this.add.image(b.fx, b.fy - 8, 'glow').setBlendMode(Phaser.BlendModes.ADD).setTint(0xffb050).setDepth(b.img.depth + 1).setScale(0.1).setAlpha(0.95);
+        this.tweens.add({ targets: burst, scale: flare ? 1.3 : 0.8, alpha: 0, duration: flare ? 900 : 650, ease: 'Cubic.easeOut', onComplete: () => burst.destroy() });
+        for (let k = 0; k < (flare ? 12 : 8); k++) {
+          const e = this.add.image(b.fx + looseRng.int(-3, 3), b.fy - 4, 'spark').setBlendMode(Phaser.BlendModes.ADD).setTint(0xffc060).setDepth(b.img.depth + 1).setScale(0.1);
+          this.tweens.add({ targets: e, x: e.x + looseRng.int(-12, 12), y: e.y - looseRng.int(16, 40), alpha: 0, scale: 0.02, duration: looseRng.int(500, 900), ease: 'Sine.easeOut', onComplete: () => e.destroy() });
+        }
+      }
+    }
+    const target = flare ? 1 : Math.min(0.75, 0.18 + (n + 1) * 0.17);
+    this.tweens.add({ targets: this, hallLight: target, duration: flare ? 500 : 900, ease: 'Sine.easeOut' });
+    if (flare) {
+      this.cameras.main.flash(380, 255, 190, 120);
+      this.cameras.main.shake(600, 0.006);
+      this.dustBurst(40);
+    }
+  }
+
+  /** One step of the walk up the carpet. Returns true when it took over. */
+  hallStep() {
+    const s = this.save;
+    if (s.defeated.cooker || this.cookerMet) return false;
+    const y = this.pos.y;
+    HALL.igniteRows.forEach((row, n) => {
+      if (y <= row && this.hallStage <= n) {
+        this.hallStage = n + 1;
+        this.ignite(n);
+        if (n === 1) music('hallWalk2');             // halfway: the heart speeds up
+      }
+    });
+    if (y <= HALL.spotRow) { this.cookerApproach(); return true; }
+    return false;
+  }
+
+  /** Dust drifting down through the Hall's light. */
+  buildHallDust() {
+    const w = (HALL.x1 - HALL.x0 + 1) * TILE_W;
+    this.hallDust = this.add.particles(0, 0, 'spark', {
+      x: { min: HALL.x0 * TILE_W, max: HALL.x0 * TILE_W + w }, y: { min: HALL.y0 * TILE_H, max: (HALL.y1 - 4) * TILE_H },
+      speedY: { min: 3, max: 9 }, speedX: { min: -3, max: 3 }, lifespan: 5200,
+      scale: { min: 0.03, max: 0.07 }, alpha: { start: 0.75, end: 0 },
+      tint: [0xe8dcff, 0xffe0b0], frequency: 90, blendMode: 'ADD',
+    }).setDepth(90000);
+    this.hallDust.emitting = false;
+  }
+
+  dustBurst(n) {
+    const view = this.cameras.main.worldView;
+    for (let i = 0; i < n; i++) {
+      const d = this.add.image(view.x + looseRng.int(0, view.width), view.y + looseRng.int(0, 40), 'spark')
+        .setBlendMode(Phaser.BlendModes.ADD).setTint(0xd8ccf0).setScale(0.05).setAlpha(0.8).setDepth(90001);
+      this.tweens.add({ targets: d, y: d.y + looseRng.int(60, 160), x: d.x + looseRng.int(-10, 10), alpha: 0, duration: looseRng.int(1400, 2600), ease: 'Sine.easeIn', onComplete: () => d.destroy() });
+    }
+  }
+
+  /** Turned back by Cooker: out through the doors, and he returns to his throne. */
+  async leaveHall() {
+    this.cookerMet = false;
+    this.placeTrainer('cooker', TRAINER_SPOTS.cooker);
+    this.hallReset();
+    await this.warp(HALL.out);
+  }
+
+  async hallGate() {
+    if (!this.save.defeated.cooker) {
+      await this.ui.say('A tall gate of gold and glass. Beyond it, names are carved into the walls of the Hall of Fame.');
+      await this.ui.say("It won't open while the Hall's champion still stands.");
+      return;
+    }
+    sfx('door');
+    this.goHallOfFame();
+  }
+
+  // ------------------------------------------------------------------- battles
+  startWild() {
+    const z = zoneAt(this.pos.y, this.pos.x);
+    const species = looseRng.weighted(poolFor(z, isNight(this.save.stats.playMs)));
+    const level = looseRng.int(z.levels[0], z.levels[1]);
+    const foe = createCreature(species, level, looseRng);
+    this.runLocked(async () => {
+      // something bursts out of the grass: jolt, leaves, a quick push-in
+      const cam = this.cameras.main;
+      const f = this.tileFoot(this.pos.x, this.pos.y);
+      for (let i = 0; i < 14; i++) {
+        const leaf = this.add.rectangle(f.x + looseRng.int(-10, 10), f.y - looseRng.int(2, 10), 2, 1, looseRng.pick([0x9be07a, 0x5fae52, 0xd8c466])).setDepth(f.y + 3);
+        this.tweens.add({ targets: leaf, x: leaf.x + looseRng.int(-26, 26), y: leaf.y - looseRng.int(10, 30), angle: looseRng.int(-360, 360), alpha: 0, duration: 520, ease: 'Cubic.easeOut', onComplete: () => leaf.destroy() });
+      }
+      this.rustle(this.pos.x, this.pos.y);
+      sfx('grass', { run: true });
+      cam.shake(220, 0.006);
+      this.tweens.add({ targets: cam, zoom: WORLD_ZOOM * 1.18, duration: 520, ease: 'Cubic.easeIn' });
+      await wait(this, 260);
+      await this.startBattle({ kind: 'wild', foes: [foe], zone: z.id });
+    });
+  }
+
+  startBattle(cfg) {
+    return new Promise((resolve) => {
+      this.locked = true;
+      this.pendingBattle = resolve;
+      this.player.anims.stop();
+      this.player.setFrame(this.idleFrame(this.facing));
+      music(cfg.trainerId === 'cooker' ? 'boss'
+        : cfg.kind === 'trainer' ? themeFor('battle', this.save.teams[cfg.trainerId].design)
+          : 'battle');
+      this.ui.battleWipe(cfg.kind, () => {
+        this.save.stats.battles += 1;
+        let data = cfg;
+        if (cfg.kind === 'trainer') {
+          // Always battle the team rolled into the save - never re-roll (see teams.js).
+          const team = structuredClone(this.save.teams[cfg.trainerId].creatures);
+          data = { ...cfg, foes: team };
+        }
+        this.scene.sleep('OverworldUI');
+        this.scene.sleep('Atmosphere');
+        this.scene.launch('Battle', data);
+        this.scene.pause();
+      });
+    });
+  }
+
+  async onBattleEnd(res) {
+    if (!res) return;
+    const s = this.save;
+    this.scene.wake('OverworldUI');
+    this.scene.wake('Atmosphere');
+    this.ui.clearWipe();
+    this.cameras.main.setZoom(WORLD_ZOOM);
+    this.cameras.main.fadeIn(350);
+    if (res.result !== 'lose') this.updateMusic(true);   // after a loss the lament plays out first
+    const done = this.pendingBattle;
+    this.pendingBattle = null;
+    const finish = () => { writeSave(); this.ui.refreshHud(); this.locked = false; done?.(); };
+
+    if (res.result === 'lose') {
+      s.stats.losses += 1;
+      if (res.kind === 'trainer' && res.trainerId) {
+        s.stats.lostTo = s.stats.lostTo ?? {};
+        s.stats.lostTo[res.trainerId] = (s.stats.lostTo[res.trainerId] ?? 0) + 1;
+      }
+      fullRestore(s.party[0]);
+      // back to the nearest checkpoint you've unlocked - saved or not
+      const cp = this.nearestCheckpoint(this.indoors ? HALL.out : this.pos) ?? { ...s.respawn, label: 'safety' };
+      this.pos = { x: cp.x, y: cp.y };
+      this.facing = cp.facing ?? 'down';
+      s.pos = { x: cp.x, y: cp.y, facing: this.facing };
+      this.face(this.facing);
+      this.syncPlayer();
+      this.applyArea();
+      if (res.trainerId === 'cooker') { this.cookerMet = false; this.placeTrainer('cooker', TRAINER_SPOTS.cooker); this.hallReset(); }
+      this.checkZone();
+      await this.ui.say([`You hurried back to ${cp.label}...`, 'Your partner was restored to full health.']);
+      this.updateMusic(true);
+      finish();
+      return;
+    }
+    if (res.result === 'win' && res.kind === 'wild') {
+      s.stats.wildWins += 1;
+      if (looseRng.chance(WILD_DROP_CHANCE)) {
+        s.bag.potion = (s.bag.potion ?? 0) + 1;
+        sfx('item');
+        await this.ui.say('You found a POTION in the grass!');
+      }
+    }
+    if (res.result === 'win' && res.kind === 'trainer') {
+      const id = res.trainerId;
+      const def = TRAINERS[id];
+      const pts = awardTrainer(s, id);
+      this.unlockCheckpoints();
+      // first defeat line was said in battle; the rest here, then the route hint
+      const rest = personality(s.teams[id].design).defeat.slice(1);
+      if (rest.length) await this.ui.say(rest, { speaker: trainerName(s.teams, id).toUpperCase(), portrait: `trainer_${s.teams[id].design}_battle` });
+      if (pts) await this.ui.say(`You earned ${pts} points! Total score: ${s.score}.`, { banner: `+${pts}` });
+      for (const [item, n] of Object.entries(def.reward ?? {})) {
+        s.bag[item] = (s.bag[item] ?? 0) + n;
+        sfx('item');
+        await this.ui.say(`Received ${n} ${ITEMS[item].name.toUpperCase()}${n > 1 ? 'S' : ''}!`);
+      }
+      // ...and, still in their voice, where to go next
+      if (id !== 'cooker') await this.ui.say(objective(s), { speaker: trainerName(s.teams, id).toUpperCase(), portrait: `trainer_${s.teams[id].design}_battle` });
+      if (TRAINER_SPOTS[id]) this.placeTrainer(id, TRAINER_SPOTS[id]);
+      if (id === 'cooker') {
+        // run complete: freeze the clear time (the leaderboard metric)
+        s.run.clearMs = s.run.ms;
+        s.run.clearedAt = new Date().toISOString();
+        s.hallOfFame = {
+          at: s.run.clearedAt,
+          score: s.score,
+          clearMs: s.run.clearMs,
+          team: structuredClone(s.party),
+          playMs: s.stats.playMs,
+        };
+        writeSave();
+        this.ui.refreshHud();
+        done?.();
+        this.goHallOfFame();
+        return;
+      }
+    }
+    finish();
+  }
+
+  goHallOfFame() {
+    this.locked = true;
+    // stand just outside the door when we come back
+    this.save.pos = { x: this.pos.x, y: this.pos.y, facing: 'down' };
+    writeSave();
+    const cam = this.cameras.main;
+    cam.fadeOut(600, 255, 255, 255);
+    cam.once('camerafadeoutcomplete', () => this.scene.start('HallOfFame'));
+  }
+}
+
+/** A teardrop flame, tinted per layer at runtime (white core, drawn once). */
+function makeFlameTexture(scene) {
+  const W = 24;
+  const H = 40;
+  const t = scene.textures.createCanvas('flame', W, H);
+  const ctx = t.getContext();
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, 'rgba(255,255,255,0)');
+  g.addColorStop(0.35, 'rgba(255,255,255,0.75)');
+  g.addColorStop(1, 'rgba(255,255,255,1)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(W / 2, 0);
+  ctx.bezierCurveTo(W * 0.62, H * 0.3, W, H * 0.55, W * 0.86, H * 0.82);
+  ctx.bezierCurveTo(W * 0.76, H, W * 0.24, H, W * 0.14, H * 0.82);
+  ctx.bezierCurveTo(0, H * 0.55, W * 0.38, H * 0.3, W / 2, 0);
+  ctx.fill();
+  t.refresh();
+}

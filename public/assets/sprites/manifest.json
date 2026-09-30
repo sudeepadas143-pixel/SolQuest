@@ -1,0 +1,145 @@
+{
+  "creatures": {
+    "emby": {
+      "front": "creatures/emby_front.png",
+      "back": "creatures/emby_back.png"
+    },
+    "emberfox": {
+      "front": "creatures/emberfox_front.png",
+      "back": "creatures/emberfox_back.png"
+    },
+    "embrute": {
+      "front": "creatures/embrute_front.png",
+      "back": "creatures/embrute_back.png"
+    },
+    "sharkpup": {
+      "front": "creatures/sharkpup_front.png",
+      "back": "creatures/sharkpup_back.png"
+    },
+    "sharkjaw": {
+      "front": "creatures/sharkjaw_front.png",
+      "back": "creatures/sharkjaw_back.png"
+    },
+    "sharkrex": {
+      "front": "creatures/sharkrex_front.png",
+      "back": "creatures/sharkrex_back.png"
+    },
+    "fernie": {
+      "front": "creatures/fernie_front.png",
+      "back": "creatures/fernie_back.png"
+    },
+    "fernbloom": {
+      "front": "creatures/fernbloom_front.png",
+      "back": "creatures/fernbloom_back.png"
+    },
+    "fernking": {
+      "front": "creatures/fernking_front.png",
+      "back": "creatures/fernking_back.png"
+    },
+    "boxbun": {
+      "front": "creatures/boxbun_front.png"
+    },
+    "rubyclaw": {
+      "front": "creatures/rubyclaw_front.png"
+    },
+    "glowblade": {
+      "front": "creatures/glowblade_front.png"
+    },
+    "scorpix": {
+      "front": "creatures/scorpix_front.png"
+    },
+    "mantek": {
+      "front": "creatures/mantek_front.png"
+    }
+  },
+  "trainers": {
+    "A": {
+      "battle": "trainers/A_battle.png",
+      "overworld": "trainers/A_ow.png",
+      "owFrameWidth": 56,
+      "owFrameHeight": 106
+    },
+    "B": {
+      "battle": "trainers/B_battle.png",
+      "overworld": "trainers/B_ow.png",
+      "owFrameWidth": 67,
+      "owFrameHeight": 100
+    },
+    "C": {
+      "battle": "trainers/C_battle.png",
+      "overworld": "trainers/C_ow.png",
+      "owFrameWidth": 68,
+      "owFrameHeight": 100
+    },
+    "D": {
+      "battle": "trainers/D_battle.png",
+      "overworld": "trainers/D_ow.png",
+      "owFrameWidth": 79,
+      "owFrameHeight": 110
+    },
+    "E": {
+      "battle": "trainers/E_battle.png",
+      "overworld": "trainers/E_ow.png",
+      "owFrameWidth": 58,
+      "owFrameHeight": 102
+    }
+  },
+  "player": {
+    "boy": {
+      "walk": "player/boy_walk.png",
+      "frameWidth": 84,
+      "frameHeight": 112,
+      "rows": [
+        "down",
+        "left",
+        "right",
+        "up"
+      ],
+      "frames": 7,
+      "walkFrames": [
+        1,
+        0,
+        2,
+        0
+      ],
+      "runFrames": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "full": "player/boy_full.png"
+    },
+    "girl": {
+      "walk": "player/girl_walk.png",
+      "frameWidth": 82,
+      "frameHeight": 114,
+      "rows": [
+        "down",
+        "left",
+        "right",
+        "up"
+      ],
+      "frames": 7,
+      "walkFrames": [
+        1,
+        0,
+        2,
+        0
+      ],
+      "runFrames": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "full": "player/girl_full.png"
+    }
+  },
+  "hd": {
+    "front": 2,
+    "back": 3,
+    "battle": 3,
+    "full": 3
+  }
+}

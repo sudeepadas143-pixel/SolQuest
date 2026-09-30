@@ -1,0 +1,13 @@
+node_modules/
+dist/
+tools/_smoke/
+tools/__pycache__/
+*.log
+tools/_tour/
+tools/_hall/
+tools/_shots/
+# source art (24 MB of originals); keep it out of the repo, the processed
+# sprites in public/ are what the game ships
+raw_assets/
+*.zip
+.vercel
