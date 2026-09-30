@@ -97,12 +97,12 @@ export function makeFx(S, dest) {
         t += k < 0.5 ? bar / 8 : k < 0.78 ? bar / 16 : bar / 32;
       }
     },
-    drop(at) {
-      tone(dest, 'sine', 72, 1.7, { vol: 0.7, f1: 27, at, attack: 0.002, release: 1.0 });
-      kit.kick(at, 1.4);
-      noise(dest, 1.9, { vol: 0.16, filter: 'highpass', f: 4200, at });
-      noise(dest, 0.45, { vol: 0.45, filter: 'lowpass', f: 3200, f1: 180, at });
-      for (const n of ['E2', 'B2', 'E3', 'G3']) S.play(dest, 'brass', freqOf(n), 0.55, at, 0.08);
+    drop(at, { size = 1 } = {}) {
+      tone(dest, 'sine', 72, 1.7, { vol: 0.7 * size, f1: 27, at, attack: 0.002, release: 1.0 });
+      kit.kick(at, 1.4 * size);
+      noise(dest, 1.9, { vol: 0.16 * size, filter: 'highpass', f: 4200, at });
+      noise(dest, 0.45, { vol: 0.45 * size, filter: 'lowpass', f: 3200, f1: 180, at });
+      for (const n of ['E2', 'B2', 'E3', 'G3']) S.play(dest, 'brass', freqOf(n), 0.55, at, 0.08 * size);
     },
     glass(at) {                    // the screen shatters
       noise(dest, 0.14, { vol: 0.4, filter: 'highpass', f: 2600, at });

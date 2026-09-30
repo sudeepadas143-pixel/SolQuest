@@ -4,6 +4,7 @@
 import { Trailer } from './compositor.js';
 import { FPS, DURATION, gridLabel } from './grid.js';
 import { shotAt, captions } from './timeline.js';
+import { CUT, CUTS } from './cut.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('c');
@@ -27,7 +28,7 @@ async function loadAudio() {
   actx = new AudioContext({ sampleRate: 48000 });
   dest = actx.createMediaStreamDestination();
   try {
-    const r = await fetch('/out/audio.wav');
+    const r = await fetch(`/out/${CUTS[CUT].audio}`);
     if (!r.ok) throw new Error(String(r.status));
     buffer = await actx.decodeAudioData(await r.arrayBuffer());
   } catch {
@@ -130,7 +131,7 @@ function record() {
   recorder.onstop = () => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }));
-    a.download = 'solquest-trailer-realtime.webm';
+    a.download = CUTS[CUT].out.replace('.mp4', '-realtime.webm');
     a.click();
     recorder = null;
     $('rec').classList.remove('on');
@@ -149,6 +150,7 @@ async function main() {
   status('loading audio ...');
   await loadAudio();
   status();
+  $('scrub').max = String(DURATION * FPS - 1);
   draw(0, true);
   $('play').onclick = () => (playing ? pause() : play());
   $('replay').onclick = () => { seek(0); play(0); };

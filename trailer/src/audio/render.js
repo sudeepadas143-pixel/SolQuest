@@ -9,8 +9,8 @@
 import { makeSynth } from './synth.js';
 import { scheduleTrack } from './track.js';
 import { makeFx } from './fx.js';
-import { cues, SILENCE0, DROP, END, BUILD0, BOARD0, LINEUP, HALL0, REVEAL0, BOSS0 } from '../timeline.js';
-import { DURATION, T } from '../grid.js';
+import { cues, SILENCE0, DROP, END, BUILD0, SECTIONS, DUCKS } from '../timeline.js';
+import { DURATION } from '../grid.js';
 import { prng } from '../remap.js';
 
 export const SR = 48000;
@@ -76,7 +76,7 @@ export async function renderAudio() {
   const duck = off.createGain();
   musicOut.disconnect();
   musicOut.connect(duck).connect(master);
-  for (const t of [DROP, BOARD0, BOSS0]) {
+  for (const t of DUCKS) {
     duck.gain.setValueAtTime(1, t);
     duck.gain.linearRampToValueAtTime(0.55, t + 0.01);
     duck.gain.linearRampToValueAtTime(1, t + 0.35);
@@ -169,8 +169,7 @@ function maxAbs(L, R, a, b) {
 }
 function sectionLevels(L, R) {
   const out = {};
-  const secs = [['fly', 0, T(3)], ['world', T(3), T(5)], ['you', T(5), LINEUP], ['bosses', LINEUP, BUILD0],
-    ['fight', BUILD0, SILENCE0], ['ko', DROP, BOARD0], ['board', BOARD0, HALL0], ['hall', HALL0, REVEAL0], ['reveal', REVEAL0, END], ['end', END, 30]];
+  const secs = SECTIONS;
   for (const [k, a, b] of secs) {
     let s = 0;
     const i0 = Math.floor(a * SR);

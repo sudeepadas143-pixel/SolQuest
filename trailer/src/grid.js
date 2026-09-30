@@ -1,10 +1,12 @@
 // The beat grid everything is cut to: 140 bpm, 4/4, one bar = 1.714 s.
+import { CUT, CUTS } from './cut.js';
+
 export const BPM = 140;
 export const BEAT = 60 / BPM;
 export const BAR = BEAT * 4;
 export const S16 = BEAT / 4;
 export const FPS = 30;
-export const DURATION = 30;
+export const DURATION = CUTS[CUT].duration;
 export const FRAMES = DURATION * FPS;
 export const W = 1920;
 export const H = 1080;

@@ -12,8 +12,14 @@ npm run capture   # real game plates -> plates/ (needs the game dev server on :5
 node capture/teaser.mjs   # the teaser's plates: world, look scene, bosses, the Hall
 npm run dev       # preview page on http://127.0.0.1:5174  (space, R replay, T timecode, scrub, record)
 npm run render    # frame-by-frame 1920x1080 / 30 fps + offline audio -> solquest-trailer.mp4
-npm run check     # beat grid, duration, frames, true peak, pre-drop gap, stills -> out/
+npm run check     # beat grid, duration, frames, true peak, pre-drop gap, flashes, stills -> out/
+npm run render:10 # the 10-second cut -> solquest-teaser-10s.mp4
+npm run check:10
 ```
+
+Two cuts share one engine (`src/cut.js`, `src/cuts/`): `full` (30 s) and
+`ten` (10 s). Pick one with `CUT=ten` in Node, or `?cut=ten` on the preview
+page (http://127.0.0.1:5174/?cut=ten).
 
 `render` starts its own Vite server if none is running. Set `FFMPEG=` or
 `CHROMIUM=` to override the binaries. `node render/render.mjs --from 12 --to 16 --out out/part.mp4`
@@ -37,6 +43,18 @@ renders a slice.
   | 20.6-24.9 s | the Elite Hall: outside at night, the brazier walk, the flare |
   | 24.9-26.6 s | the final Elite's VS screen (name hidden) |
   | 26.6-30 s | end card |
+- **The 10-second cut.** Show little, land hard:
+
+  | Time | What's on screen |
+  |---|---|
+  | 0-1.7 s | the drone flyover at speed, morning to night |
+  | 1.7-2.6 s | the portrait shrinking into the sprite |
+  | 2.6-4.3 s | four VS screens, one per beat (only Ansem named) |
+  | 4.3-5.1 s | the knockout blow in slow motion |
+  | 5.1-6.4 s | the Hall walk, the braziers catching |
+  | 6.4-7 s | a push-in on the dark figure on the dais (never revealed) |
+  | 7-7.3 s | black and silence |
+  | 7.3-10 s | the logo on the drop, "win creator fees daily.", "coming soon" |
 - **Flashes.** Flashes are kept soft (at most a 0.2 white lift, on a handful
   of hits). `npm run check` counts large full-frame brightness reversals and
   fails if any 1 s window has more than 3.

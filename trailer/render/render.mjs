@@ -3,6 +3,7 @@
 // frames), piped straight into ffmpeg and muxed with the offline soundtrack.
 //
 //   node render/render.mjs            -> solquest-trailer.mp4
+//   CUT=ten node render/render.mjs    -> solquest-teaser-10s.mp4
 //   node render/render.mjs --from 12 --to 16 --out out/part.mp4   (a slice, for checks)
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -10,6 +11,7 @@ import path from 'node:path';
 import { ROOT, OUT, server, page, ffmpegPath } from './common.mjs';
 import { renderAudioFile } from './audio.mjs';
 import { FPS, DURATION } from '../src/grid.js';
+import { CUT, CUTS } from '../src/cut.js';
 
 const arg = (k, d) => {
   const i = process.argv.indexOf(k);
@@ -17,13 +19,13 @@ const arg = (k, d) => {
 };
 const from = Number(arg('--from', 0));
 const to = Number(arg('--to', DURATION));
-const outFile = path.resolve(ROOT, arg('--out', 'solquest-trailer.mp4'));
+const outFile = path.resolve(ROOT, arg('--out', CUTS[CUT].out));
 const f0 = Math.round(from * FPS);
 const f1 = Math.round(to * FPS);
 
 const stop = await server();
 try {
-  const wav = path.join(OUT, 'audio.wav');
+  const wav = path.join(OUT, CUTS[CUT].audio);
   if (!existsSync(wav) || process.argv.includes('--audio')) {
     console.log('rendering audio ...');
     const { report } = await renderAudioFile();

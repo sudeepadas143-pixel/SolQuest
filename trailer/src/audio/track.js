@@ -5,6 +5,7 @@
 // (5-6) -> the bosses (6-8) -> build (9) -> silence -> drop (10-12) -> the
 // Hall: a heartbeat (13-14) -> the final Elite (15-16) -> the logo cuts it.
 import { T, S16 } from '../grid.js';
+import { CUT } from '../cut.js';
 import { chord } from './synth.js';
 
 const bars = (...b) => b.join(' ');
@@ -125,6 +126,51 @@ const SONG = {
     punch: 'K . . . K . . . . . . . . . . .',
   },
 };
+// The 10 s cut: an open, the groove that turns into boss stabs, a half-time
+// hit under the knockout, the heartbeat in the Hall - then the logo on the
+// drop, with a pad ringing under it.
+const SONG_TEN = {
+  1: {
+    pad: hold('E3+B3+D4+F#4'), padVol: 0.08,
+    lead: 'E4 - - - B4 - - - E5 - - - - - D5 -', leadVol: 0.07,
+    bell: '. . . . . . . . B5 . . . E6 . . .', bellVol: 0.06,
+    bass: hold('E2'), bassInstr: 'bass', bassVol: 0.15,
+    drums: 't . . . . . . . t . . . t . t t', dv: 0.9,
+  },
+  2: {
+    arp: ARP.Em.split(' ').slice(0, 8).join(' ') + ' ' + rest(8), arpVol: 0.05,
+    stab: rest(8) + ' E3+G3+B3 . . . E3+G3+B3 . . .', stabVol: 0.1,
+    bass: oct16('E2', 'E3').split(' ').slice(0, 8).join(' ') + ' E1 - - - E1 - - -', bassVol: 0.15,
+    pad: hold(PAD.Em), padVol: 0.035,
+    drums: 'k . h h s . h h t . . . t . . .', dv: 1,
+    punch: 'K . . . . . . . K . . . K . . .',
+  },
+  3: {
+    stab: 'F3+Ab3+C4 . . . E3+G3+B3 . . . E3+B3+E4+G4 - - - - - - -', stabVol: 0.075,
+    bass: 'F1 - - - E1 - - - E1 - - - - - - -', bassInstr: 'bass', bassVol: 0.13,
+    lead: rest(8) + ' E5 - - - G5 - F#5 -', leadVol: 0.075,
+    pad: hold('E3+G3+B3+D4'), padVol: 0.045,
+    drums: 't . . . t . t t k . . . . . . .', dv: 1,
+    punch: 'K . . . K . . . K . . . . . . .',
+  },
+  4: {
+    pad: hold('E2+B2+E3'), padVol: 0.06,
+    bass: hold('E1'), bassInstr: 'bass', bassVol: 0.16,
+    bell: '. . . . . . . . B4 . . . . . . .', bellVol: 0.05,
+    drums: 'k . . k . . . . k . . k . k . k', dv: 0.95,
+  },
+  5: {
+    pad: rest(4) + ' ' + hold('E3+B3+E4+G4', 12), padVol: 0.06,
+    bell: '. . . . E5 . B5 . E6 . . . B5 . . .', bellVol: 0.05,
+    bass: rest(4) + ' ' + hold('E1', 12), bassInstr: 'bass', bassVol: 0.14,
+  },
+  6: {
+    pad: hold('E3+B3+E4+G4', 12) + ' . . . .', padVol: 0.05,
+    bell: '. . . . G5 . . . E5 . . . . . . .', bellVol: 0.04,
+    bass: hold('E1', 12) + ' . . . .', bassInstr: 'bass', bassVol: 0.12,
+  },
+};
+
 const DROP_LEAD = {
   Em: 'E5 - - - B4 - - - E5 - F#5 - G5 - - -',
   C: 'G5 - - - E5 - - - C5 - - - E5 - G5 -',
@@ -172,8 +218,10 @@ export function scheduleTrack(synth, bus, echo, kit) {
       for (const f of fs) synth.play(bus, instr, f, dur, t0 + i * S16, vol / Math.sqrt(fs.length), useEcho ? echo : null);
     });
   };
-  for (let bar = 1; bar <= 16; bar++) {
-    let v = SONG[bar];
+  const song = CUT === 'ten' ? SONG_TEN : SONG;
+  const last = Math.max(...Object.keys(song).map(Number));
+  for (let bar = 1; bar <= last; bar++) {
+    let v = song[bar];
     if (typeof v === 'string') v = dropBar(v, bar === 11);
     if (!v) continue;
     const t0 = T(bar);

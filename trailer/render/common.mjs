@@ -9,7 +9,8 @@ import { chromium } from 'playwright';
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const OUT = path.join(ROOT, 'out');
 export const PORT = 5174;
-export const URL = `http://127.0.0.1:${PORT}/render.html`;
+export const CUT = process.env.CUT || 'full';
+export const URL = `http://127.0.0.1:${PORT}/render.html${CUT === 'full' ? '' : `?cut=${CUT}`}`;
 
 export function ffmpegPath() {
   if (process.env.FFMPEG) return process.env.FFMPEG;

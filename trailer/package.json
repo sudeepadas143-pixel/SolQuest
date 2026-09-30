@@ -7,7 +7,9 @@
     "dev": "vite --port 5174",
     "capture": "node capture/capture.mjs",
     "render": "node render/render.mjs",
-    "check": "node render/check.mjs"
+    "check": "node render/check.mjs",
+    "render:10": "CUT=ten node render/render.mjs",
+    "check:10": "CUT=ten node render/check.mjs"
   },
   "dependencies": {
     "gsap": "^3.12.5",

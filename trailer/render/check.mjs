@@ -1,6 +1,6 @@
 // Post-render checks on solquest-trailer.mp4:
 //   1. every cut and caption slam against the 140 bpm grid (and the frame it lands on)
-//   2. stills at 0 / 3 / 8 / 14 / 22 / 28 s
+//   2. stills (0 / 3 / 8 / 14 / 22 / 28 s; per cut, see src/cut.js)
 //   3. true peak (EBU R128) under -1 dBTP, loudness
 //   4. the pre-drop gap: black picture + digital silence
 //   5. duration / format
@@ -9,10 +9,11 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ROOT, OUT, ffmpegPath } from './common.mjs';
 import { FPS, DURATION, BEAT, S16, gridLabel, offGrid, cutFrame } from '../src/grid.js';
+import { CUT, CUTS } from '../src/cut.js';
 import { shots, captions, impacts, cues, SILENCE0, DROP, HANDLE } from '../src/timeline.js';
 
 const FF = ffmpegPath();
-const mp4 = path.resolve(ROOT, process.argv[2] ?? 'solquest-trailer.mp4');
+const mp4 = path.resolve(ROOT, process.argv[2] ?? CUTS[CUT].out);
 const ff = (args) => execFileSync(FF, ['-hide_banner', ...args], { maxBuffer: 1 << 30, stdio: ['ignore', 'pipe', 'pipe'] });
 /** ffmpeg's log (stderr), for commands whose report goes there. */
 const ffLog = (args) => String(spawnSync(FF, ['-hide_banner', ...args], { maxBuffer: 1 << 30 }).stderr);
@@ -123,14 +124,14 @@ log('');
 
 // ------------------------------------------------------------ 6. stills
 log('# stills');
-const dir = path.join(OUT, 'stills');
+const dir = path.join(OUT, CUT === 'full' ? 'stills' : `stills-${CUT}`);
 mkdirSync(dir, { recursive: true });
-for (const t of [0, 3, 8, 14, 22, 28]) {
-  const f = path.join(dir, `still_${String(t).padStart(2, '0')}s.png`);
+for (const t of CUTS[CUT].stills) {
+  const f = path.join(dir, `still_${String(t).replace('.', '_').padStart(2, '0')}s.png`);
   ff(['-loglevel', 'error', '-y', '-ss', String(t), '-i', mp4, '-frames:v', '1', f]);
   log(`  ${path.relative(ROOT, f)}  (${gridLabel(t)})`);
 }
 log('');
 log(fails ? `${fails} check(s) FAILED` : 'all checks passed');
-writeFileSync(path.join(OUT, 'check-report.txt'), lines.join('\n') + '\n');
+writeFileSync(path.join(OUT, CUT === 'full' ? 'check-report.txt' : `check-report-${CUT}.txt`), lines.join('\n') + '\n');
 process.exit(fails ? 1 : 0);
