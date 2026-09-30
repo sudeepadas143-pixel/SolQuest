@@ -1,8 +1,8 @@
 // The trailer cue: 140 bpm, E minor, written in the game's own track notation
 // (src/data/music.js: one token per sixteenth, 'E5' note, 'E3+G3+B3' chord,
 // '-' hold, '.' rest; drums k s h r t c) and played by the game's voices.
-// Sections follow the edit: calm (bar 2) -> world (3-4) -> battle (5-6) ->
-// build (7-8) -> silence -> drop (9-14) -> dark (15) -> one hit (16).
+// Sections follow the edit: calm (bars 1-2) -> world (3-4) -> battle (5-6) ->
+// the boss (7-8) -> build (9) -> silence -> drop (10-14) -> dark (15) -> one hit (16).
 import { T, S16 } from '../grid.js';
 import { chord } from './synth.js';
 
@@ -25,10 +25,17 @@ const ROOT = { Em: ['E2', 'E3'], C: ['C2', 'C3'], D: ['D2', 'D3'], B: ['B1', 'B2
 // bar number -> voices (strings of 16 tokens). Drums: game tokens, plus the
 // trailer's punch kit on 'K' (kick) and 'P' (clap) lanes for the drop.
 const SONG = {
+  1: {
+    pad: hold('E3+B3+D4+F#4'), padVol: 0.08,
+    bell: 'B4 . E5 . F#5 . G5 . . . F#5 . E5 . . .', bellVol: 0.085,
+    bass: hold('E2'), bassInstr: 'bass', bassVol: 0.14,
+  },
   2: {
-    pad: hold('E3+B3+D4+F#4'), padVol: 0.05,
-    bell: 'B4 . E5 . F#5 . G5 . . . F#5 . E5 . . .', bellVol: 0.06,
-    bass: hold('E2'), bassInstr: 'bass', bassVol: 0.09,
+    pad: hold('E3+B3+D4+F#4'), padVol: 0.08,
+    bell: '. . . . B4 . E5 . G5 . . . A5 . B5 .', bellVol: 0.085,
+    arp: 'E4 . B4 . E5 . B4 . E4 . B4 . E5 . F#5 .', arpVol: 0.045,
+    bass: hold('E2'), bassInstr: 'bass', bassVol: 0.14,
+    drums: 'k . . . . . . . k . . . k . . .', dv: 0.6,
   },
   3: {
     arp: half(ARP.Em, ARP.C), arpVol: 0.045,
@@ -60,19 +67,26 @@ const SONG = {
     drums: 'k . h h s . h h k . h h s . s s', dv: 0.9,
     punch: 'K . . . . . . . K . . . . . . .',
   },
-  7: {
+  7: {       // the boss: the game's VS screen - dark stabs, timpani on the beat
+    stab: 'E3+G3+B3 . . . E3+G3+B3 . . . F3+Ab3+C4 . . . E3+G3+B3 . . .', stabVol: 0.09,
+    bass: 'E1 - - - E1 - - - F1 - - - E1 - - -', bassVol: 0.14,
+    pad: hold('E3+G3+B3'), padVol: 0.035,
+    drums: 't . . . t . . . t . . . t . t t', dv: 1.2,
+    punch: 'K . . . K . . . K . . . K . . .',
+  },
+  8: {
     arp: 'E4 G4 B4 E5 E4 G4 B4 E5 G4 B4 E5 G5 G4 B4 E5 G5', arpVol: 0.05,
     bass: oct16('E2', 'E2'), bassVol: 0.12,
     pad: hold('E3+B3+E4'), padVol: 0.04,
     drums: 'k . . . k . . . k . . . k . . .', dv: 0.9,
   },
-  8: {
+  9: {
     arp: 'B4 E5 G5 B5 B4 E5 G5 B5 E5 G5 B5 E6 E5 G5 B5 E6', arpVol: 0.055,
     bass: oct16('E2', 'E2'), bassVol: 0.12,
     pad: hold('E3+B3+E4'), padVol: 0.045,
     drums: 'k . . . k . . . k . k . k k k k', dv: 0.9,
   },
-  9: {       // the drop lands half-time under the slow-motion knockout
+  10: {      // the drop lands half-time under the slow-motion knockout
     lead: 'E5 - - - - - - - G5 - - - F#5 - D5 -', leadVol: 0.085,
     stab: hold('E3+B3+E4+G4', 8) + ' ' + rest(8), stabVol: 0.1,
     bass: hold('E1'), bassInstr: 'bass', bassVol: 0.2,
@@ -80,15 +94,7 @@ const SONG = {
     drums: 'k . . . . . . . s . . . . . k .', dv: 1,
     punch: 'K . . . . . . . P . . . . . K .',
   },
-  10: 'Em', 11: 'C', 12: 'D', 13: 'B',
-  14: {      // zero: one hit, the board resets, the glitch rises
-    lead: hold('E5', 12) + ' . . . .', leadVol: 0.08,
-    stab: hold('E3+B3+E4+G4', 6) + ' ' + rest(10), stabVol: 0.1,
-    bass: hold('E1', 12) + ' . . . .', bassInstr: 'bass', bassVol: 0.18,
-    pad: hold('E3+G3+B3'), padVol: 0.04,
-    drums: 'c . . . . . . . . . . . . . . .', dv: 1,
-    punch: 'K . . . . . . . . . . . . . . .',
-  },
+  11: 'Em', 12: 'C', 13: 'D', 14: 'B',
   15: {      // new map: dark, timpani on the beat
     stab: 'E3+G3+B3 . . . E3+G3+B3 . . . F3+Ab3+C4 . . . E3+G3+B3 . . .', stabVol: 0.09,
     bass: 'E1 - - - E1 - - - F1 - - - E1 - - -', bassVol: 0.14,
@@ -107,6 +113,15 @@ const DROP_BELL = {
   Em: '. . . . . . . . B5 . . . E6 . . .', C: '. . . . . . . . C6 . . . G5 . . .',
   D: '. . . . . . . . D6 . . . A5 . . .', B: '. . . . . . . . D#6 . . . B5 . . .',
 };
+/** Silence every lane from sixteenth `n` on (the countdown hits zero there). */
+function cut(bar, n) {
+  const out = { ...bar };
+  for (const [k, v] of Object.entries(bar)) {
+    if (typeof v !== 'string' || !/\s/.test(v)) continue;
+    out[k] = parse(v).map((tok, i) => (i < n ? tok : '.')).join(' ');
+  }
+  return out;
+}
 function dropBar(ch, first) {
   return {
     lead: DROP_LEAD[ch], leadVol: 0.08,
@@ -135,9 +150,10 @@ export function scheduleTrack(synth, bus, echo, kit) {
       for (const f of fs) synth.play(bus, instr, f, dur, t0 + i * S16, vol / Math.sqrt(fs.length), useEcho ? echo : null);
     });
   };
-  for (let bar = 2; bar <= 15; bar++) {
+  for (let bar = 1; bar <= 15; bar++) {
     let v = SONG[bar];
-    if (typeof v === 'string') v = dropBar(v, bar === 10 || bar === 12);
+    if (typeof v === 'string') v = dropBar(v, bar === 12);
+    if (bar === 14) v = cut(v, 12);      // the clock hits zero on beat 4
     if (!v) continue;
     const t0 = T(bar);
     if (v.lead) voice(v.lead, 'brass', v.leadVol, t0, true);

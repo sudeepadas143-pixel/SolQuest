@@ -73,9 +73,9 @@ ok(TP && +TP[1] < -1, `true peak ${TP ? TP[1] : '?'} dBTP (< -1)`);
 // ------------------------------------------------------------ 4. the gap
 const pcm = ff(['-loglevel', 'error', '-i', mp4, '-map', '0:a', '-f', 'f32le', '-ac', '2', '-ar', '48000', '-']);
 const a = new Float32Array(pcm.buffer, pcm.byteOffset, pcm.length / 4);
-// AAC smears ~1 frame (21 ms) of pre-echo across the edges; check the gap's inside
-const i0 = Math.ceil((SILENCE0 + 0.03) * 48000) * 2;
-const i1 = Math.floor((DROP - 0.03) * 48000) * 2;
+// AAC spreads each edge across up to two 1024-sample frames (~43 ms); check the gap's inside
+const i0 = Math.ceil((SILENCE0 + 0.045) * 48000) * 2;
+const i1 = Math.floor((DROP - 0.045) * 48000) * 2;
 let mx = 0;
 for (let i = i0; i < i1; i++) mx = Math.max(mx, Math.abs(a[i]));
 ok(mx < 10 ** (-80 / 20), `pre-drop gap ${SILENCE0.toFixed(3)}-${DROP.toFixed(3)} s is silent (max ${mx === 0 ? '-inf' : (20 * Math.log10(mx)).toFixed(1)} dBFS inside the AAC edges)`);
@@ -89,7 +89,39 @@ for (const f of gapFrames) {
 ok(maxLuma <= 20, `gap frames ${gapFrames[0]}-${gapFrames.at(-1)} are black (max luma ${maxLuma}/255)`);
 log('');
 
-// ------------------------------------------------------------ 5. stills
+// ------------------------------------------------------------ 5. flashes
+// Simplified photosensitivity check: a "flash" is a pair of opposing swings
+// in mean frame brightness of >= 10% of full scale; at most 3 in any 1 s.
+{
+  const raw = ff(['-loglevel', 'error', '-i', mp4, '-vf', 'scale=64:36,format=gray', '-f', 'rawvideo', '-']);
+  const n = raw.length / (64 * 36);
+  const luma = [];
+  for (let f = 0; f < n; f++) {
+    let sum = 0;
+    for (let i = f * 2304; i < (f + 1) * 2304; i++) sum += raw[i];
+    luma.push(sum / 2304 / 255);
+  }
+  // swings: runs of same-direction change between local extremes
+  const swings = [];
+  let start = 0;
+  for (let f = 1; f < n; f++) {
+    const d0 = Math.sign(luma[f] - luma[f - 1]);
+    const d1 = f + 1 < n ? Math.sign(luma[f + 1] - luma[f]) : 0;
+    if (d1 !== d0) {
+      const amp = luma[f] - luma[start];
+      if (Math.abs(amp) >= 0.1) swings.push({ f, dir: Math.sign(amp) });
+      start = f;
+    }
+  }
+  const flashes = [];
+  for (let i = 1; i < swings.length; i++) if (swings[i].dir !== swings[i - 1].dir) flashes.push(swings[i].f);
+  let worst = 0;
+  for (const f of flashes) worst = Math.max(worst, flashes.filter((g) => g >= f && g < f + FPS).length);
+  ok(worst <= 3, `flashes: at most ${worst} large brightness reversals in any 1 s window (limit 3); ${flashes.length} in total`);
+}
+log('');
+
+// ------------------------------------------------------------ 6. stills
 log('# stills');
 const dir = path.join(OUT, 'stills');
 mkdirSync(dir, { recursive: true });

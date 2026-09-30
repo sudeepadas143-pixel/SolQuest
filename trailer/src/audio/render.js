@@ -9,7 +9,7 @@
 import { makeSynth } from './synth.js';
 import { scheduleTrack } from './track.js';
 import { makeFx } from './fx.js';
-import { cues, SILENCE0, DROP, END, FLICK0 } from '../timeline.js';
+import { cues, SILENCE0, DROP, END, BUILD0, BOARD0, COUNT0, ZERO, NEWMAP } from '../timeline.js';
 import { DURATION, T } from '../grid.js';
 import { prng } from '../remap.js';
 
@@ -47,11 +47,11 @@ export async function renderAudio() {
   build.type = 'lowpass';
   build.Q.value = 0.7;
   build.frequency.setValueAtTime(9000, 0);
-  build.frequency.setValueAtTime(1500, FLICK0);
-  build.frequency.exponentialRampToValueAtTime(9000, SILENCE0);   // the bars 7-8 sweep
+  build.frequency.setValueAtTime(1500, BUILD0);
+  build.frequency.exponentialRampToValueAtTime(9000, SILENCE0);   // the sweep under the fight
   build.frequency.setValueAtTime(9000, DROP);
-  // bars 7-8 swell into the cut instead of sagging under the filter
-  music.gain.setValueAtTime(1, FLICK0);
+  // the fight swells into the cut instead of sagging under the filter
+  music.gain.setValueAtTime(1, BUILD0);
   music.gain.linearRampToValueAtTime(1.5, SILENCE0);
   music.gain.setValueAtTime(1, DROP);
   music.connect(build);
@@ -76,7 +76,7 @@ export async function renderAudio() {
   const duck = off.createGain();
   musicOut.disconnect();
   musicOut.connect(duck).connect(master);
-  for (const t of [DROP, T(10), T(12), T(14), T(15)]) {
+  for (const t of [DROP, BOARD0, COUNT0, ZERO, NEWMAP]) {
     duck.gain.setValueAtTime(1, t);
     duck.gain.linearRampToValueAtTime(0.55, t + 0.01);
     duck.gain.linearRampToValueAtTime(1, t + 0.35);
@@ -138,6 +138,9 @@ export async function renderAudio() {
   const s1 = Math.floor(DROP * SR);
   L.fill(0, s0, s1);
   R.fill(0, s0, s1);
+  // a 10 ms fade into the cut, so the AAC encoder doesn't ring into the gap
+  const fd = Math.round(0.01 * SR);
+  for (let i = 0; i < fd; i++) { const g = i / fd; L[s0 - fd + i] *= 1 - g; R[s0 - fd + i] *= 1 - g; }
   const f0 = Math.floor((DURATION - 0.3) * SR);
   for (let i = f0; i < L.length; i++) {
     const g = 0.5 + 0.5 * Math.cos(Math.PI * ((i - f0) / (L.length - f0)));
@@ -166,8 +169,8 @@ function maxAbs(L, R, a, b) {
 }
 function sectionLevels(L, R) {
   const out = {};
-  const secs = [['candles', 0, T(2)], ['grass', T(2), T(3)], ['world', T(3), T(5)], ['battle', T(5), T(7)],
-    ['build', T(7), SILENCE0], ['drop', DROP, T(12)], ['countdown', T(12), T(15)], ['newmap', T(15), T(16)], ['end', T(16), 30]];
+  const secs = [['intro', 0, T(3)], ['start', T(3), T(5)], ['wild', T(5), T(7)], ['vs', T(7), BUILD0],
+    ['fight', BUILD0, SILENCE0], ['ko', DROP, BOARD0], ['board', BOARD0, NEWMAP], ['newmap', NEWMAP, END], ['end', END, 30]];
   for (const [k, a, b] of secs) {
     let s = 0;
     const i0 = Math.floor(a * SR);

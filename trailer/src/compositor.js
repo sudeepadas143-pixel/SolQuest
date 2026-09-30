@@ -1,7 +1,7 @@
 // The compositor: renders any moment of the trailer from a single time value.
 //
 //   game plates (real frames, native 960x640) -> pixel-sharp upscale through a
-//   pixel-snapped camera -> overlays (candles / board / silhouettes / HUD
+//   pixel-snapped camera -> overlays (board / silhouettes / HUD
 //   inserts / logo / UI) -> EffectComposer: glitch wipe, gold-only bloom, and
 //   a final pass with RGB split, glitch, light CRT scanlines, shake and flash.
 import * as THREE from 'three';
@@ -9,11 +9,10 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { W, H, FPS, BAR } from './grid.js';
+import { W, H, FPS } from './grid.js';
 import * as TL from './timeline.js';
 import { PlateBank } from './plates.js';
 import * as SH from './shaders.js';
-import { drawCandles, PW, PH } from './scenes/candles.js';
 import { drawBoard, drawDamage, drawCaption, drawHandle, drawSparkles, loadOverlayAssets } from './scenes/overlay.js';
 import { fontsReady, loadImage, trainerUrl, creatureUrl } from './gameui.js';
 import { noise1, prng } from './remap.js';
@@ -25,6 +24,8 @@ const BOSS_DESIGNS = ['A', 'C', 'E', 'D'];      // every Elite but Ansem: silhou
 const NEW_CREATURES = ['scorpix', 'rubyclaw', 'boxbun'];
 const WIPE_LEN = 0.16;
 const SHATTER_LEN = 0.62;
+const PW = 480;                                  // the pixel layer: the game's native 480x270, upscaled 4x
+const PH = 270;
 
 function canvasTexture(canvas, nearest) {
   const t = new THREE.CanvasTexture(canvas);
@@ -76,7 +77,7 @@ export class Trailer {
     this.main = quad(plateCam(), 0);
     this.fitScreen(this.main);
 
-    // low-res pixel layer (candles, sparkles), upscaled nearest-neighbour
+    // low-res pixel layer (sparkles), upscaled nearest-neighbour
     this.pixCanvas = Object.assign(document.createElement('canvas'), { width: PW, height: PH });
     this.pixCtx = this.pixCanvas.getContext('2d');
     this.pixTex = canvasTexture(this.pixCanvas, true);
@@ -267,7 +268,7 @@ export class Trailer {
     if (sh.kind === 'plate') out.push([sh.plate, this.plates.index(sh.plate, sh.remap(t - sh.t0))]);
     if (sh.kind === 'board' && t - sh.t0 < SHATTER_LEN) {
       const ko = TL.shotById('ko');
-      out.push(['ansem_ko', this.plates.index('ansem_ko', ko.remap(BAR - 1e-4))]);
+      out.push(['ansem_ko', this.plates.index('ansem_ko', ko.remap(ko.t1 - ko.t0 - 1e-4))]);
     }
     return out;
   }
@@ -280,12 +281,6 @@ export class Trailer {
   // ----------------------------------------------------------- one shot
   /** Set the scene up for a shot at local time lt. Returns the camera used. */
   setupShot(sh, lt, S, wait, frozenCam = null) {
-    if (sh.kind === 'candles') {
-      drawCandles(this.pixCtx, lt);
-      this.pixTex.needsUpdate = true;
-      this.pix.visible = true;
-      return null;
-    }
     if (sh.kind === 'plate') {
       const src = sh.remap(lt);
       const i = this.plates.index(sh.plate, src);
@@ -376,7 +371,7 @@ export class Trailer {
     if (sh.kind === 'board' && lt < SHATTER_LEN && sh.enter?.type === 'shatter') {
       const ko = TL.shotById('ko');
       this.hideAll();
-      this.setupShot(ko, BAR - 1e-4, S, wait, ko.cam.to);
+      this.setupShot(ko, ko.t1 - ko.t0 - 1e-4, S, wait, ko.cam.to);
       this.setupInsetFinal(ko);
       r.setRenderTarget(this.rtFrozen);
       r.render(this.scene, this.camera);
