@@ -9,6 +9,7 @@ reads `../public` (as `/assets`) and `../src` (as `@game`).
 ```bash
 npm install
 npm run capture   # real game plates -> plates/ (needs the game dev server on :5173)
+node capture/teaser.mjs   # the teaser's plates: world, look scene, bosses, the Hall
 npm run dev       # preview page on http://127.0.0.1:5174  (space, R replay, T timecode, scrub, record)
 npm run render    # frame-by-frame 1920x1080 / 30 fps + offline audio -> solquest-trailer.mp4
 npm run check     # beat grid, duration, frames, true peak, pre-drop gap, stills -> out/
@@ -22,20 +23,20 @@ renders a slice.
 
 - **Grid.** 140 bpm (beat 0.4286 s, bar 1.714 s). Every shot, caption and
   sound-design cue is placed on it in `src/timeline.js` with `T(bar, beat, 16th)`.
-- **Edit.** Shots hold 2-8 beats so each one reads:
+- **Edit.** A teaser, built on the world, the character and the bosses:
 
   | Time | What's on screen |
   |---|---|
-  | 0-3.4 s | tall grass at dusk |
-  | 3.4-6.9 s | name, wallet, starter pick |
-  | 6.9-10.3 s | a wild battle, then level up |
-  | 10.3-12.9 s | the game's VS screen (KAI vs ELITE TRAINER ANSEM) |
-  | 12.9-15.1 s | the fight: move menu, hit, HP drain |
-  | 15.1-15.4 s | 0.32 s of black and silence |
-  | 15.4-18.9 s | the slow-motion knockout |
-  | 18.9-24 s | leaderboard, pool and countdown |
-  | 24-25.7 s | new map with silhouettes |
-  | 25.7-30 s | end card |
+  | 0-3.4 s | drone flyover of the whole route, morning to night |
+  | 3.4-6.9 s | Market Square, Willow Pond, the windmill, the route in the rain |
+  | 6.9-9.4 s | the look scene: the portrait shrinks into the overworld sprite |
+  | 9.4-12 s | three Elites' VS screens (names hidden) |
+  | 12-15.4 s | Ansem's VS screen, the hit, 0.32 s of black and silence |
+  | 15.4-18 s | the slow-motion knockout |
+  | 18-20.6 s | leaderboard and pool |
+  | 20.6-24.9 s | the Elite Hall: outside at night, the brazier walk, the flare |
+  | 24.9-26.6 s | the final Elite's VS screen (name hidden) |
+  | 26.6-30 s | end card |
 - **Flashes.** Flashes are kept soft (at most a 0.2 white lift, on a handful
   of hits). `npm run check` counts large full-frame brightness reversals and
   fails if any 1 s window has more than 3.
@@ -60,13 +61,13 @@ renders a slice.
 
 | Kind | Assets |
 |---|---|
-| Captured gameplay (plates) | tall grass at dusk; name entry; wallet screen; starter pick (Emby); wild battle (move menu, hit, HP drain, level up); the Ansem battle (VS intro, move menu, hit, HP drain); the Ansem KO (final hit, HP to zero, faint); rainy-night pond (new map); title-screen logo; UI backdrop |
-| Creature sprites | emberfox, sharkrex, fernking, sharkjaw, fernbloom (leaderboard rows); scorpix, rubyclaw, boxbun (new-map silhouettes) |
-| Trainer sprites | Elites A, C, E and D (Cooker), as unnamed dark silhouettes only. Ansem appears only as his in-game battle sprite and in the game's battle-intro text. |
+| Captured gameplay (plates) | drone flyover (time-lapse); Market Square, Willow Pond pier, the windmill, the route in the rain, the Elite Hall at night; the look scene (portrait shrinking into the sprite); VS screens for Elites A, C and E and the final Elite D, with their names hidden; the Hall brazier walk and flare; the Ansem battle (VS intro, hit) and KO; title-screen logo; UI backdrop |
+| Creature sprites | emberfox, sharkrex, fernking, sharkjaw, fernbloom (leaderboard rows) |
+| Trainer sprites | every Elite, as the game draws them; only Ansem is named (by the game's own VS screen). The other bosses' names are hidden at capture. |
 | UI | `ui/skin.js` panels (gold, glass, chip) and icons (star, clock), the game palette (`COLORS`), `formatRun` run-time format, Pixelify Sans (the game font) |
-| Sound effects | grass, cursor, confirm, attack, superHit, levelup, encounterTrainer, vs, faint, tick, item, lowHp, cancel, thunder, spotted, cry, evolveBurst (all from `src/systems/audio.js`) |
+| Sound effects | footstep, status, sendout, tick, confirm, vs, encounterTrainer, attack, superHit, faint, item, hallDoors, ignite, flare, spotted, evolveBurst (all from `src/systems/audio.js`) |
 | Music voices | the game's `INSTR` table and note/drum voices (the 140 bpm cue itself is new; no game track is 140 bpm) |
 
-Made for the trailer only: the leaderboard, pool and countdown graphics, and
+Made for the trailer only: the leaderboard and pool graphics, and
 the damage numbers. The leaderboard names, times, pool amount and trades are
 illustrative. The trailer contains no contract address.

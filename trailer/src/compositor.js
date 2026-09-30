@@ -415,7 +415,8 @@ export class Trailer {
     fu.uFlash.value = f.flash;
     fu.uFade.value = f.fade;
     const endGlow = sh.kind === 'end' ? S.end.glow : 0;
-    this.bloom.strength = 0.55 + 0.6 * f.bloom + 0.9 * endGlow;
+    // (a shot that is mostly gold - the final Elite's VS splash - turns the gold glow down)
+    this.bloom.strength = (0.55 + 0.6 * f.bloom) * (sh.bloomScale ?? 1) + 0.9 * endGlow;
     this.bloom.highPassUniforms.uAll.value = endGlow * 0.9;
     this.composer.render();
     return sh.id;

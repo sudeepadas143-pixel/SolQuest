@@ -1,8 +1,9 @@
 // The trailer cue: 140 bpm, E minor, written in the game's own track notation
 // (src/data/music.js: one token per sixteenth, 'E5' note, 'E3+G3+B3' chord,
 // '-' hold, '.' rest; drums k s h r t c) and played by the game's voices.
-// Sections follow the edit: calm (bars 1-2) -> world (3-4) -> battle (5-6) ->
-// the boss (7-8) -> build (9) -> silence -> drop (10-14) -> dark (15) -> one hit (16).
+// Sections follow the edit: the flyover (bars 1-2) -> the world (3-4) -> you
+// (5-6) -> the bosses (6-8) -> build (9) -> silence -> drop (10-12) -> the
+// Hall: a heartbeat (13-14) -> the final Elite (15-16) -> the logo cuts it.
 import { T, S16 } from '../grid.js';
 import { chord } from './synth.js';
 
@@ -38,18 +39,18 @@ const SONG = {
     drums: 'k . . . . . . . k . . . k . . .', dv: 0.6,
   },
   3: {
-    arp: half(ARP.Em, ARP.C), arpVol: 0.045,
-    bass: `${oct8('E2', 'E3').split(' ').slice(0, 8).join(' ')} ${oct8('C2', 'C3').split(' ').slice(8).join(' ')}`, bassVol: 0.12,
+    arp: half(ARP.Em, ARP.C), arpVol: 0.055,
+    bass: `${oct8('E2', 'E3').split(' ').slice(0, 8).join(' ')} ${oct8('C2', 'C3').split(' ').slice(8).join(' ')}`, bassVol: 0.15,
     pad: `${hold(PAD.Em, 8)} ${hold(PAD.C, 8)}`, padVol: 0.035,
-    bell: '. . . . B5 . . . . . . . G5 . . .', bellVol: 0.045,
-    drums: 'k . h . k . h . k . h . k . h .', dv: 0.8,
+    bell: '. . . . B5 . . . . . . . G5 . . .', bellVol: 0.06,
+    drums: 'k . h . k . h . k . h . k . h .', dv: 0.95,
   },
   4: {
-    arp: half(ARP.D, ARP.B), arpVol: 0.045,
-    bass: `${oct8('D2', 'D3').split(' ').slice(0, 8).join(' ')} ${oct8('B1', 'B2').split(' ').slice(8).join(' ')}`, bassVol: 0.12,
+    arp: half(ARP.D, ARP.B), arpVol: 0.055,
+    bass: `${oct8('D2', 'D3').split(' ').slice(0, 8).join(' ')} ${oct8('B1', 'B2').split(' ').slice(8).join(' ')}`, bassVol: 0.15,
     pad: `${hold(PAD.D, 8)} ${hold(PAD.B, 8)}`, padVol: 0.035,
-    bell: '. . . . A5 . . . . . . . F#5 . D#5 .', bellVol: 0.045,
-    drums: 'k . h . k . h . k . h . k . h h', dv: 0.8,
+    bell: '. . . . A5 . . . . . . . F#5 . D#5 .', bellVol: 0.06,
+    drums: 'k . h . k . h . k . h . k . h h', dv: 0.95,
   },
   5: {
     lead: 'E5 - - - B4 - - - C5 - - - E5 - G5 -', leadVol: 0.075,
@@ -94,13 +95,34 @@ const SONG = {
     drums: 'k . . . . . . . s . . . . . k .', dv: 1,
     punch: 'K . . . . . . . P . . . . . K .',
   },
-  11: 'Em', 12: 'C', 13: 'D', 14: 'B',
-  15: {      // new map: dark, timpani on the beat
-    stab: 'E3+G3+B3 . . . E3+G3+B3 . . . F3+Ab3+C4 . . . E3+G3+B3 . . .', stabVol: 0.09,
-    bass: 'E1 - - - E1 - - - F1 - - - E1 - - -', bassVol: 0.14,
-    pad: hold('E3+G3+B3'), padVol: 0.035,
-    drums: 't . . . t . . . t . . . t . t t', dv: 1.2,
-    punch: 'K . . . K . . . K . . . K . . .',
+  11: 'Em', 12: 'C',
+  13: {      // the Elite Hall: everything drops out but a heartbeat and a drone
+    pad: hold('E2+B2+E3'), padVol: 0.06,
+    bell: '. . . . . . . . . . . . B4 . . .', bellVol: 0.05,
+    bass: hold('E1'), bassInstr: 'bass', bassVol: 0.16,
+    drums: 'k . . k . . . . k . . k . . . .', dv: 0.9,
+  },
+  14: {      // the heart speeds up; on beat 3 every flame flares
+    pad: hold('E2+B2+E3', 8) + ' ' + hold('E3+G3+B3', 8), padVol: 0.06,
+    stab: rest(8) + ' E3+G3+B3 . . . F3+Ab3+C4 . . .', stabVol: 0.09,
+    bass: hold('E1', 8) + ' E1 - - - F1 - - -', bassInstr: 'bass', bassVol: 0.17,
+    drums: 'k . k . . . k . t . . . t . t t', dv: 1,
+    punch: rest(8) + ' K . . . K . . .',
+  },
+  15: {      // the build, then the final Elite on beat 3
+    stab: 'E3+G3+B3 . . . F3+Ab3+C4 . . . E3+B3+E4+G4 - - - - - - -', stabVol: 0.1,
+    bass: 'E1 - - - F1 - - - E1 - - - - - - -', bassInstr: 'bass', bassVol: 0.2,
+    pad: hold('E3+G3+B3'), padVol: 0.045,
+    lead: rest(8) + ' E5 - - - B5 - - -', leadVol: 0.085,
+    drums: 't . t . t t t t c . . . k . . .', dv: 1.2,
+    punch: rest(8) + ' K . . . K . . .',
+  },
+  16: {      // two more beats of the final Elite's theme, then the logo cuts it
+    stab: 'E3+G3+B3 . . . F3+Ab3+C4 . . . . . . . . . . .', stabVol: 0.09,
+    bass: 'E1 - - - F1 - - - . . . . . . . .', bassInstr: 'bass', bassVol: 0.18,
+    lead: 'G5 - - - F#5 - - - . . . . . . . .', leadVol: 0.08,
+    drums: 't . . . t . t t . . . . . . . .', dv: 1.2,
+    punch: 'K . . . K . . . . . . . . . . .',
   },
 };
 const DROP_LEAD = {
@@ -150,10 +172,9 @@ export function scheduleTrack(synth, bus, echo, kit) {
       for (const f of fs) synth.play(bus, instr, f, dur, t0 + i * S16, vol / Math.sqrt(fs.length), useEcho ? echo : null);
     });
   };
-  for (let bar = 1; bar <= 15; bar++) {
+  for (let bar = 1; bar <= 16; bar++) {
     let v = SONG[bar];
-    if (typeof v === 'string') v = dropBar(v, bar === 12);
-    if (bar === 14) v = cut(v, 12);      // the clock hits zero on beat 4
+    if (typeof v === 'string') v = dropBar(v, bar === 11);
     if (!v) continue;
     const t0 = T(bar);
     if (v.lead) voice(v.lead, 'brass', v.leadVol, t0, true);
