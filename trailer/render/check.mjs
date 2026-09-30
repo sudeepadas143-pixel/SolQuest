@@ -1,0 +1,101 @@
+// Post-render checks on solquest-trailer.mp4:
+//   1. every cut and caption slam against the 140 bpm grid (and the frame it lands on)
+//   2. stills at 0 / 3 / 8 / 14 / 22 / 28 s
+//   3. true peak (EBU R128) under -1 dBTP, loudness
+//   4. the pre-drop gap: black picture + digital silence
+//   5. duration / format
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { ROOT, OUT, ffmpegPath } from './common.mjs';
+import { FPS, DURATION, BEAT, S16, gridLabel, offGrid, cutFrame } from '../src/grid.js';
+import { shots, captions, impacts, cues, SILENCE0, DROP, HANDLE } from '../src/timeline.js';
+
+const FF = ffmpegPath();
+const mp4 = path.resolve(ROOT, process.argv[2] ?? 'solquest-trailer.mp4');
+const ff = (args) => execFileSync(FF, ['-hide_banner', ...args], { maxBuffer: 1 << 30, stdio: ['ignore', 'pipe', 'pipe'] });
+/** ffmpeg's log (stderr), for commands whose report goes there. */
+const ffLog = (args) => String(spawnSync(FF, ['-hide_banner', ...args], { maxBuffer: 1 << 30 }).stderr);
+
+const lines = [];
+const log = (s = '') => { lines.push(s); console.log(s); };
+let fails = 0;
+const ok = (cond, msg) => { if (!cond) fails++; log(`${cond ? 'PASS' : 'FAIL'}  ${msg}`); };
+
+// ------------------------------------------------------------ 1. beat grid
+log('# beat grid (140 bpm: beat 428.6 ms, 16th 107.1 ms; 30 fps)');
+log('');
+const rows = [];
+for (const s of shots) rows.push(['cut', s.id, s.t0]);
+for (const c of captions) rows.push(['text', c.text, c.t0]);
+rows.push(['text', HANDLE.text, HANDLE.t0]);
+rows.sort((a, b) => a[2] - b[2]);
+let worst = 0;
+log('kind  time      grid        frame  frame err  off-grid  what');
+for (const [kind, what, t] of rows) {
+  const dev = offGrid(t) * 1000;
+  const fr = cutFrame(t);
+  const ferr = (fr / FPS - t) * 1000;
+  worst = Math.max(worst, Math.abs(dev));
+  log(`${kind.padEnd(5)} ${t.toFixed(3).padStart(7)}s  ${gridLabel(t).padEnd(10)}  ${String(fr).padStart(4)}  ${ferr.toFixed(1).padStart(6)} ms  ${dev.toFixed(2).padStart(6)} ms  ${what}`);
+}
+ok(worst < 0.5, `all ${rows.length} cuts + text slams on the 16th-note grid (worst ${worst.toFixed(3)} ms; frame quantisation <= ${(500 / FPS).toFixed(1)} ms)`);
+// hits inside a shot: on the grid, or deliberately on the game's own hit frame
+const sync = impacts.filter((h) => Math.abs(offGrid(h.t)) > 0.0005);
+log(`INFO  ${impacts.length - sync.length}/${impacts.length} flash/shake/rgb hits on the grid; ${sync.length} sit on the captured game's hit frame (${sync.map((h) => '+' + Math.round((h.t - Math.round(h.t / S16) * S16) * 1000) + 'ms').join(', ')})`);
+const fxOff = cues.filter((c) => c.type === 'fx' && Math.abs(offGrid(c.t)) > 0.0005);
+ok(fxOff.length === 0, `trailer sound design (slams, whooshes, riser, glass, drop, logo) on the grid${fxOff.length ? ': off ' + fxOff.map((c) => c.name + '@' + c.t.toFixed(3)).join(' ') : ''}`);
+log('');
+
+// ------------------------------------------------------------ 2. format
+log('# file');
+const info = ffLog(['-i', mp4]);
+const dur = /Duration: (\d+):(\d+):([\d.]+)/.exec(info);
+const secs = dur ? +dur[1] * 3600 + +dur[2] * 60 + +dur[3] : 0;
+log(info.split('\n').filter((l) => /Duration|Stream/.test(l)).map((l) => '  ' + l.trim()).join('\n'));
+ok(Math.abs(secs - DURATION) < 0.05, `duration ${secs.toFixed(3)} s`);
+ok(/1920x1080/.test(info) && /30 fps/.test(info) && /h264/.test(info) && /aac/.test(info), '1920x1080, 30 fps, H.264 + AAC');
+const nb = /frame=\s*(\d+)/.exec(ffLog(['-i', mp4, '-map', '0:v', '-f', 'null', '-']));
+ok(nb && +nb[1] === DURATION * FPS, `frame count ${nb ? nb[1] : '?'}`);
+log('');
+
+// ------------------------------------------------------------ 3. loudness
+log('# audio');
+const eb = ffLog(['-nostats', '-i', mp4, '-map', '0:a', '-af', 'ebur128=peak=true', '-f', 'null', '-']);
+const I = /I:\s+(-?[\d.]+) LUFS/.exec(eb.slice(eb.lastIndexOf('Summary')));
+const TP = /Peak:\s+(-?[\d.]+) dBFS/.exec(eb.slice(eb.lastIndexOf('Summary')));
+log(`  integrated ${I ? I[1] : '?'} LUFS`);
+ok(TP && +TP[1] < -1, `true peak ${TP ? TP[1] : '?'} dBTP (< -1)`);
+
+// ------------------------------------------------------------ 4. the gap
+const pcm = ff(['-loglevel', 'error', '-i', mp4, '-map', '0:a', '-f', 'f32le', '-ac', '2', '-ar', '48000', '-']);
+const a = new Float32Array(pcm.buffer, pcm.byteOffset, pcm.length / 4);
+// AAC smears ~1 frame (21 ms) of pre-echo across the edges; check the gap's inside
+const i0 = Math.ceil((SILENCE0 + 0.03) * 48000) * 2;
+const i1 = Math.floor((DROP - 0.03) * 48000) * 2;
+let mx = 0;
+for (let i = i0; i < i1; i++) mx = Math.max(mx, Math.abs(a[i]));
+ok(mx < 10 ** (-80 / 20), `pre-drop gap ${SILENCE0.toFixed(3)}-${DROP.toFixed(3)} s is silent (max ${mx === 0 ? '-inf' : (20 * Math.log10(mx)).toFixed(1)} dBFS inside the AAC edges)`);
+const gapFrames = [];
+for (let f = Math.ceil(SILENCE0 * FPS + 1e-6); f < Math.floor(DROP * FPS - 1e-6); f++) gapFrames.push(f);
+let maxLuma = 0;
+for (const f of gapFrames) {
+  const raw = ff(['-loglevel', 'error', '-ss', ((f + 0.5) / FPS).toFixed(4), '-i', mp4, '-frames:v', '1', '-vf', 'scale=96:54,format=gray', '-f', 'rawvideo', '-']);
+  maxLuma = Math.max(maxLuma, ...raw);
+}
+ok(maxLuma <= 20, `gap frames ${gapFrames[0]}-${gapFrames.at(-1)} are black (max luma ${maxLuma}, video black = 16)`);
+log('');
+
+// ------------------------------------------------------------ 5. stills
+log('# stills');
+const dir = path.join(OUT, 'stills');
+mkdirSync(dir, { recursive: true });
+for (const t of [0, 3, 8, 14, 22, 28]) {
+  const f = path.join(dir, `still_${String(t).padStart(2, '0')}s.png`);
+  ff(['-loglevel', 'error', '-y', '-ss', String(t), '-i', mp4, '-frames:v', '1', f]);
+  log(`  ${path.relative(ROOT, f)}  (${gridLabel(t)})`);
+}
+log('');
+log(fails ? `${fails} check(s) FAILED` : 'all checks passed');
+writeFileSync(path.join(OUT, 'check-report.txt'), lines.join('\n') + '\n');
+process.exit(fails ? 1 : 0);

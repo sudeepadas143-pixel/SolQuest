@@ -1,0 +1,19 @@
+{
+  "name": "solquest-trailer",
+  "private": true,
+  "type": "module",
+  "description": "30s SolQuest trailer built from the game's own renderer, scenes, sprites, UI, font, SFX and synth.",
+  "scripts": {
+    "dev": "vite --port 5174",
+    "capture": "node capture/capture.mjs",
+    "render": "node render/render.mjs",
+    "check": "node render/check.mjs"
+  },
+  "dependencies": {
+    "gsap": "^3.12.5",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}
