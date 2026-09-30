@@ -42,9 +42,12 @@ for (const [kind, what, t] of rows) {
 ok(worst < 0.5, `all ${rows.length} cuts + text slams on the 16th-note grid (worst ${worst.toFixed(3)} ms; frame quantisation <= ${(500 / FPS).toFixed(1)} ms)`);
 // hits inside a shot: on the grid, or deliberately on the game's own hit frame
 const sync = impacts.filter((h) => Math.abs(offGrid(h.t)) > 0.0005);
-log(`INFO  ${impacts.length - sync.length}/${impacts.length} flash/shake/rgb hits on the grid; ${sync.length} sit on the captured game's hit frame (${sync.map((h) => '+' + Math.round((h.t - Math.round(h.t / S16) * S16) * 1000) + 'ms').join(', ')})`);
+log(`INFO  ${impacts.length - sync.length}/${impacts.length} flash/shake/rgb hits on the grid; ${sync.length} sit on the captured game's hit frame (${sync.map((h) => { const d = Math.round(offGrid(h.t) * 1000); return (d > 0 ? '+' : '') + d + ' ms'; }).join(', ')})`);
+// sound design: on the grid, unless it lands with a hit that follows the game's own hit frame
 const fxOff = cues.filter((c) => c.type === 'fx' && Math.abs(offGrid(c.t)) > 0.0005);
-ok(fxOff.length === 0, `trailer sound design (slams, whooshes, riser, glass, drop, logo) on the grid${fxOff.length ? ': off ' + fxOff.map((c) => c.name + '@' + c.t.toFixed(3)).join(' ') : ''}`);
+const hitSynced = (c) => sync.some((h) => Math.abs(h.t - c.t) < 0.0005);
+const fxBad = fxOff.filter((c) => !hitSynced(c));
+ok(fxBad.length === 0, `trailer sound design (slams, whooshes, riser, glass, drop, logo) on the grid${fxBad.length ? ': off ' + fxBad.map((c) => c.name + '@' + c.t.toFixed(3)).join(' ') : ''}${fxOff.length - fxBad.length ? `; ${fxOff.length - fxBad.length} land with a game-synced hit (${fxOff.filter(hitSynced).map((c) => c.name + '@' + c.t.toFixed(3)).join(' ')})` : ''}`);
 log('');
 
 // ------------------------------------------------------------ 2. format
@@ -55,7 +58,7 @@ const secs = dur ? +dur[1] * 3600 + +dur[2] * 60 + +dur[3] : 0;
 log(info.split('\n').filter((l) => /Duration|Stream/.test(l)).map((l) => '  ' + l.trim()).join('\n'));
 ok(Math.abs(secs - DURATION) < 0.05, `duration ${secs.toFixed(3)} s`);
 ok(/1920x1080/.test(info) && /30 fps/.test(info) && /h264/.test(info) && /aac/.test(info), '1920x1080, 30 fps, H.264 + AAC');
-const nb = /frame=\s*(\d+)/.exec(ffLog(['-i', mp4, '-map', '0:v', '-f', 'null', '-']));
+const nb = [...ffLog(['-i', mp4, '-map', '0:v', '-f', 'null', '-']).matchAll(/frame=\s*(\d+)/g)].at(-1);
 ok(nb && +nb[1] === DURATION * FPS, `frame count ${nb ? nb[1] : '?'}`);
 log('');
 
@@ -83,7 +86,7 @@ for (const f of gapFrames) {
   const raw = ff(['-loglevel', 'error', '-ss', ((f + 0.5) / FPS).toFixed(4), '-i', mp4, '-frames:v', '1', '-vf', 'scale=96:54,format=gray', '-f', 'rawvideo', '-']);
   maxLuma = Math.max(maxLuma, ...raw);
 }
-ok(maxLuma <= 20, `gap frames ${gapFrames[0]}-${gapFrames.at(-1)} are black (max luma ${maxLuma}, video black = 16)`);
+ok(maxLuma <= 20, `gap frames ${gapFrames[0]}-${gapFrames.at(-1)} are black (max luma ${maxLuma}/255)`);
 log('');
 
 // ------------------------------------------------------------ 5. stills

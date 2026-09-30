@@ -164,8 +164,8 @@ export class Trailer {
     });
     composer.addPass(this.fx);
     this.composer = composer;
-    this.logoTexReady = this.plates.load('logo', 0);
-    this.backdropReady = this.plates.load('backdrop', 0);
+    this.logoTexReady = this.plates.pin('logo', 0);
+    this.backdropReady = this.plates.pin('backdrop', 0);
     await Promise.all([this.logoTexReady, this.backdropReady]);
   }
 

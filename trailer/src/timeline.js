@@ -296,7 +296,7 @@ fx(DROP, 'drop'); sfx(DROP, 'superHit');
 sfx(DROP + 1.28, 'faint');
 // the board
 fx(BOARD0, 'glass'); fx(BOARD0, 'slam', { size: 1 });
-for (let i = 0; i < 5; i++) { fx(BOARD0 + 0.1 + i * S16, 'whoosh', { dir: 1, soft: true }); sfx(BOARD0 + 0.2 + i * S16, 'cursor'); }
+for (let i = 0; i < 5; i++) { fx(BOARD0 + (i + 1) * S16, 'whoosh', { dir: 1, soft: true }); sfx(BOARD0 + 0.2 + i * S16, 'cursor'); }
 board.trades.forEach((tr, i) => { sfx(tr.t, 'tick'); if (i % 2 === 0) sfx(tr.t + 0.3, 'item'); });
 sfx(T(11, 0, 2), 'item'); sfx(T(11, 0, 3), 'item'); sfx(T(11, 1), 'item'); fx(T(11, 0, 2), 'sparkle');
 // countdown

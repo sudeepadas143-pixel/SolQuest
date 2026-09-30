@@ -7,6 +7,7 @@ export class PlateBank {
     this.max = max;
     this.cache = new Map();      // key -> Promise<Texture>
     this.ready = new Map();      // key -> Texture (decoded)
+    this.pinned = new Set();     // keys the LRU never evicts (logo, backdrop)
   }
 
   async init() {
@@ -33,6 +34,12 @@ export class PlateBank {
 
   key(plate, i) { return `${plate}/${String(i).padStart(4, '0')}`; }
 
+  /** Load a frame and keep it for the whole run (stills reused across the trailer). */
+  pin(plate, i) {
+    this.pinned.add(this.key(plate, i));
+    return this.load(plate, i);
+  }
+
   load(plate, i) {
     const k = this.key(plate, i);
     if (this.cache.has(k)) {
@@ -57,8 +64,8 @@ export class PlateBank {
       img.src = `/plates/${k}.png`;
     });
     this.cache.set(k, p);
-    while (this.cache.size > this.max) {
-      const old = this.cache.keys().next().value;
+    while (this.cache.size - this.pinned.size > this.max) {
+      const old = [...this.cache.keys()].find((key) => !this.pinned.has(key));
       this.ready.get(old)?.dispose();
       this.ready.delete(old);
       this.cache.delete(old);
