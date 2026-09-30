@@ -1,5 +1,5 @@
 // Renders the title-screen drone flight (drone.html) frame by frame and encodes
-// the seamless loop for the game: public/assets/title/drone.{mp4,webm} + poster.png.
+// the seamless loop for the game: public/assets/title/drone.{mp4,webm} + poster.jpg.
 //
 //   node render/drone.mjs                 render every frame (4 parallel workers), then encode
 //   node render/drone.mjs --workers 2     fewer workers
@@ -8,7 +8,7 @@
 // Frames go to out/drone-frames/NNNN.png and existing ones are skipped, so an
 // interrupted render resumes where it stopped.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, copyFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -47,14 +47,18 @@ function encode() {
   const n = readdirSync(FRAMES).filter((f) => f.endsWith('.png')).length;
   if (n < N) throw new Error(`only ${n}/${N} frames rendered`);
   mkdirSync(OUT, { recursive: true });
-  copyFileSync(frameFile(0), path.join(OUT, 'poster.png'));
   const run = (args) => new Promise((res, rej) => {
     const p = spawn(FF, ['-hide_banner', '-loglevel', 'error', '-y', '-framerate', String(FPS), '-i', path.join(FRAMES, '%04d.png'), ...args], { stdio: 'inherit' });
     p.on('close', (c) => (c === 0 ? res() : rej(new Error('ffmpeg ' + c))));
   });
   const crf = arg('--crf', '25');
-  return run(['-vf', 'format=yuv420p', '-c:v', 'libx264', '-profile:v', 'high', '-preset', 'veryslow', '-crf', crf, '-tune', 'film',
-    '-g', '90', '-an', '-movflags', '+faststart', path.join(OUT, 'drone.mp4')])
+  // the poster: frame 0 as a light JPEG (shown instantly while the video streams)
+  const poster = new Promise((res, rej) => {
+    const p = spawn(FF, ['-hide_banner', '-loglevel', 'error', '-y', '-i', frameFile(0), '-q:v', '3', path.join(OUT, 'poster.jpg')], { stdio: 'inherit' });
+    p.on('close', (c) => (c === 0 ? res() : rej(new Error('ffmpeg ' + c))));
+  });
+  return poster.then(() => run(['-vf', 'format=yuv420p', '-c:v', 'libx264', '-profile:v', 'high', '-preset', 'veryslow', '-crf', crf, '-tune', 'film',
+    '-g', '90', '-an', '-movflags', '+faststart', path.join(OUT, 'drone.mp4')]))
     // VP9 for browsers without H.264 (the game offers both)
     .then(() => run(['-vf', 'format=yuv420p', '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', String(Number(crf) + 12), '-row-mt', '1',
       '-deadline', 'good', '-cpu-used', '2', '-g', '90', '-an', path.join(OUT, 'drone.webm')]));
