@@ -12,82 +12,80 @@ import { OUTDOOR_W, MAP_H } from '@game/data/map.js';
 import tilesMeta from '@game/data/tiles.json';
 
 export const U = {                  // shared uniforms (set every frame by the flight)
-  uSnap: { value: new THREE.Vector2(240, 160) },
   uNight: { value: 0 },
   uTime: { value: 0 },
 };
 
-/** Lambert + the retro bits: vertex snapping, baked-emissive faces that glow
- *  at night, optional wind sway, optional affine (PS1-style) texture mapping. */
-export function retroMaterial({ map = null, sway = false, affine = false, tint = null } = {}) {
-  const m = new THREE.MeshLambertMaterial({ vertexColors: !map && !tint, flatShading: !map, map, side: THREE.DoubleSide });
-  if (tint) m.color = new THREE.Color(tint);
+/** Lambert on the baked atlas: alpha < 1 marks emissive texels (windows,
+ *  lamps) that glow at night; optional wind sway for the grass. */
+export function modelMaterial(map, { sway = false } = {}) {
+  const m = new THREE.MeshLambertMaterial({ map, flatShading: true, side: THREE.DoubleSide });
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>
-        attribute float emit;
-        varying float vEmit;
-        uniform vec2 uSnap;
-        uniform float uTime;
-        ${affine ? 'varying vec3 vAff;' : ''}`)
+      .replace('#include <common>', '#include <common>\nuniform float uTime;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         ${sway ? `{
           vec4 wp0 = modelMatrix * vec4(position, 1.0);
           float h = max(position.y, 0.0);
           float g = 0.55 + 0.45 * sin(uTime * 0.37 + wp0.x * 0.05);
           transformed.x += sin(wp0.x * 0.55 - wp0.z * 0.22 - uTime * 2.4) * h * 0.22 * g;
-        }` : ''}`)
-      .replace('#include <project_vertex>', `#include <project_vertex>
-        vEmit = emit;
-        // snap to the low-res pixel grid: the wobble of the old consoles
-        // (only in front of the camera: snapping vertices behind it would break clipping)
-        if (gl_Position.w > 0.5) gl_Position.xy = floor(gl_Position.xy / gl_Position.w * uSnap + 0.5) / uSnap * gl_Position.w;
-        ${affine ? 'vAff = vec3(vMapUv * gl_Position.w, gl_Position.w);' : ''}`);
+        }` : ''}`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>
-        varying float vEmit;
-        uniform float uNight;
-        ${affine ? 'varying vec3 vAff;' : ''}`)
+      .replace('#include <common>', '#include <common>\nuniform float uNight;\nfloat vEm = 0.0;')
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        vEm = step(sampledDiffuseColor.a, 0.75);
+        diffuseColor.a = 1.0;`)
       .replace('#include <opaque_fragment>', `
-        outgoingLight = mix(outgoingLight, diffuseColor.rgb * (0.8 + 1.1 * uNight), vEmit);
+        outgoingLight = mix(outgoingLight, diffuseColor.rgb * (0.85 + 1.25 * uNight), vEm);
         #include <opaque_fragment>`);
-    if (affine) {
-      sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
-        'vec4 sampledDiffuseColor = texture2D( map, vAff.xy / vAff.z ); diffuseColor *= sampledDiffuseColor;');
-    }
   };
   return m;
 }
 
+/** Plain lit material (ground, meadow, hills). */
+export function groundMaterial({ map = null, color = null } = {}) {
+  const m = new THREE.MeshLambertMaterial({ map, color: color ? new THREE.Color(color) : 0xffffff });
+  return m;
+}
+
+const crispTexture = (t, repeat = false) => {
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.anisotropy = 8;
+  t.colorSpace = THREE.NoColorSpace;
+  if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.needsUpdate = true;
+  return t;
+};
+
 // ------------------------------------------------------------------ models
 const MODEL_CACHE = new Map();
+const loader = new THREE.TextureLoader();
 async function loadModel(name, index) {
   if (MODEL_CACHE.has(name)) return MODEL_CACHE.get(name);
   const info = index[name];
   const buf = await (await fetch(`/drone/assets/props/${name}.bin`)).arrayBuffer();
-  const n = info.tris;
-  const P = new Float32Array(buf, 0, n * 9);
-  const C = new Uint8Array(buf, n * 36, n * 3);
-  const E = new Uint8Array(buf, n * 39, n);
-  const pos = new Float32Array(n * 9);
-  const col = new Uint8Array(n * 9);
-  const emit = new Float32Array(n * 3);
-  for (let i = 0; i < n * 3; i++) {
+  const F = new Float32Array(buf);
+  const n = info.verts;
+  const pos = new Float32Array(n * 3);
+  const uv = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) {
     // model (x east, y south, z up; 16 per tile) -> scene (x, y up, z south; 1 per tile)
-    pos[i * 3] = P[i * 3] / 16;
-    pos[i * 3 + 1] = P[i * 3 + 2] / 16;
-    pos[i * 3 + 2] = P[i * 3 + 1] / 16;
-    const t = Math.floor(i / 3);
-    col[i * 3] = C[t * 3]; col[i * 3 + 1] = C[t * 3 + 1]; col[i * 3 + 2] = C[t * 3 + 2];
-    emit[i] = E[t];
+    pos[i * 3] = F[i * 5] / 16;
+    pos[i * 3 + 1] = F[i * 5 + 2] / 16;
+    pos[i * 3 + 2] = F[i * 5 + 1] / 16;
+    uv[i * 2] = F[i * 5 + 3];
+    uv[i * 2 + 1] = F[i * 5 + 4];
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setAttribute('color', new THREE.BufferAttribute(col, 3, true));
-  g.setAttribute('emit', new THREE.BufferAttribute(emit, 1));
-  MODEL_CACHE.set(name, g);
-  return g;
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  const tex = crispTexture(await loader.loadAsync(`/drone/assets/props/${name}.png`));
+  const entry = { g, tex };
+  MODEL_CACHE.set(name, entry);
+  return entry;
 }
 
 const placed = (g, x, z, rotY = 0, s = 1) => {
@@ -109,100 +107,89 @@ export async function buildWorld(scene) {
   const tw = tilesMeta.tileWidth;
   const th = tilesMeta.tileHeight;
 
-  // ---- ground: one quad per outdoor tile, UVs into the game's tileset
-  const tex = await new THREE.TextureLoader().loadAsync('/assets/tiles/tileset.png');
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
-  tex.generateMipmaps = false;
-  tex.colorSpace = THREE.NoColorSpace;
-  const atlasW = tex.image.width;
-  const nT = atlasW / tw;
-  const gpos = [];
-  const guv = [];
+  // ---- ground: the whole route painted into one texture from the game's
+  // tileset (one 64x48 tile per map tile), so it mipmaps cleanly
+  const tileset = await loader.loadAsync('/assets/tiles/tileset.png');
+  const cv = document.createElement('canvas');
+  cv.width = OUTDOOR_W * tw;
+  cv.height = MAP_H * th;
+  const cx = cv.getContext('2d');
+  cx.imageSmoothingEnabled = false;
+  for (let y = 0; y < MAP_H; y++) {
+    for (let x = 0; x < OUTDOOR_W; x++) {
+      cx.drawImage(tileset.image, map.indices[y][x] * tw, 0, tw, th, x * tw, y * th, tw, th);
+    }
+  }
+  const gtex = crispTexture(new THREE.CanvasTexture(cv));
+  const groundGeo = new THREE.PlaneGeometry(OUTDOOR_W, MAP_H, OUTDOOR_W, MAP_H).rotateX(-Math.PI / 2);
+  const ground = new THREE.Mesh(groundGeo, groundMaterial({ map: gtex }));
+  ground.position.set(OUTDOOR_W / 2, 0, MAP_H / 2);
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  // water: the game's water tile, repeating and drifting over the pond tiles
+  const tileCanvas = (name) => {
+    const c = document.createElement('canvas');
+    c.width = tw; c.height = th;
+    c.getContext('2d').drawImage(tileset.image, tilesMeta.tiles[name].index * tw, 0, tw, th, 0, 0, tw, th);
+    return c;
+  };
+  const wtex = crispTexture(new THREE.CanvasTexture(tileCanvas('water')), true);
   const wpos = [];
   const wuv = [];
   for (let y = 0; y < MAP_H; y++) {
     for (let x = 0; x < OUTDOOR_W; x++) {
-      const tile = map.ground[y][x];
-      const i = map.indices[y][x];
-      const water = tile === 'water';
-      const u0 = (i + 0.5 / tw) / nT;
-      const u1 = (i + 1 - 0.5 / tw) / nT;
-      const v0 = 0.5 / th;
-      const v1 = 1 - 0.5 / th;
-      const P = water ? wpos : gpos;
-      const UV = water ? wuv : guv;
-      const yy = water ? -0.03 : 0;
-      // two triangles (x east, z south); texture top = north
-      P.push(x, yy, y, x, yy, y + 1, x + 1, yy, y + 1, x, yy, y, x + 1, yy, y + 1, x + 1, yy, y);
-      if (water) UV.push(x, y, x, y + 1, x + 1, y + 1, x, y, x + 1, y + 1, x + 1, y);
-      else UV.push(u0, v1, u0, v0, u1, v0, u0, v1, u1, v0, u1, v1);
+      if (map.ground[y][x] !== 'water') continue;
+      wpos.push(x, 0.01, y, x, 0.01, y + 1, x + 1, 0.01, y + 1, x, 0.01, y, x + 1, 0.01, y + 1, x + 1, 0.01, y);
+      wuv.push(x, -y, x, -y - 1, x + 1, -y - 1, x, -y, x + 1, -y - 1, x + 1, -y);
     }
   }
-  const quadGeo = (P, UV) => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(UV, 2));
-    g.setAttribute('emit', new THREE.Float32BufferAttribute(new Float32Array(P.length / 3), 1));
-    g.computeVertexNormals();
-    return g;
-  };
-  const ground = new THREE.Mesh(quadGeo(gpos, guv), retroMaterial({ map: tex, affine: true }));
-  ground.receiveShadow = true;
-  scene.add(ground);
-
-  // water: the game's water tile, repeating and drifting
-  const wc = document.createElement('canvas');
-  wc.width = tw; wc.height = th;
-  const wi = tilesMeta.tiles.water.index;
-  wc.getContext('2d').drawImage(tex.image, wi * tw, 0, tw, th, 0, 0, tw, th);
-  const wtex = new THREE.CanvasTexture(wc);
-  wtex.wrapS = wtex.wrapT = THREE.RepeatWrapping;
-  wtex.magFilter = wtex.minFilter = THREE.NearestFilter;
-  wtex.generateMipmaps = false;
-  wtex.colorSpace = THREE.NoColorSpace;
-  const water = new THREE.Mesh(quadGeo(wpos, wuv), retroMaterial({ map: wtex }));
+  const wgeo = new THREE.BufferGeometry();
+  wgeo.setAttribute('position', new THREE.Float32BufferAttribute(wpos, 3));
+  wgeo.setAttribute('uv', new THREE.Float32BufferAttribute(wuv, 2));
+  wgeo.computeVertexNormals();
+  const water = new THREE.Mesh(wgeo, groundMaterial({ map: wtex }));
   water.receiveShadow = true;
   scene.add(water);
 
-  // ---- props, merged into chunks (so off-screen chunks are culled)
-  const CH = 12;
-  const chunks = new Map();
-  const add = (g, cx, cz) => {
-    const k = `${Math.floor(cx / CH)},${Math.floor(cz / CH)}`;
-    if (!chunks.has(k)) chunks.set(k, []);
-    chunks.get(k).push(g);
+  // ---- props: every placement of a model merged into one mesh (one atlas)
+  const byModel = new Map();
+  const add = (name, g) => {
+    if (!byModel.has(name)) byModel.set(name, []);
+    byModel.get(name).push(g);
   };
   for (const p of map.props) {
     if (p.x >= OUTDOOR_W - 1 && !p.border) continue;                   // the Hall's interior sits east of the route
-    if (p.type === 'floor_emblem' || p.type === 'pillar' || p.type === 'brazier') continue;
     if (!index[p.type]) continue;
-    const g = await loadModel(p.type, index);
-    add(placed(g, p.x, p.y), p.x, p.y);
+    const { g } = await loadModel(p.type, index);
+    add(p.type, placed(g, p.x, p.y));
   }
   // tall grass (back + front halves) on every encounter tile, clumps on open grass
-  const grass = [];
+  const grassSets = new Map();
+  const addGrass = (name, g) => { if (!grassSets.has(name)) grassSets.set(name, []); grassSets.get(name).push(g); };
   for (let y = 0; y < MAP_H; y++) {
     for (let x = 0; x < OUTDOOR_W; x++) {
       const h = hash(x, y);
       if (map.isEncounter(x, y)) {
         const v = h % 4;
-        grass.push(placed(await loadModel(`tall_back${v}`, index), x, y));
-        grass.push(placed(await loadModel(`tall_front${v}`, index), x, y));
+        for (const layer of ['back', 'front']) addGrass(`tall_${layer}${v}`, placed((await loadModel(`tall_${layer}${v}`, index)).g, x, y));
       } else if (map.ground[y][x] === 'grass' && !map.blocked[y][x] && h % 100 < 9) {
-        grass.push(placed(await loadModel(`clump${h % 3}`, index), x, y));
+        addGrass(`clump${h % 3}`, placed((await loadModel(`clump${h % 3}`, index)).g, x, y));
       }
     }
   }
-  const grassMesh = new THREE.Mesh(mergeGeometries(grass), retroMaterial({ sway: true }));
-  grassMesh.castShadow = false;
-  grassMesh.receiveShadow = true;
-  scene.add(grassMesh);
+  for (const [name, list] of grassSets) {
+    const mesh = new THREE.Mesh(mergeGeometries(list), modelMaterial(MODEL_CACHE.get(name).tex, { sway: true }));
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
 
   // ---- beyond the route: rolling meadow, a deep forest, far hills
+  const mtex = crispTexture(new THREE.CanvasTexture(tileCanvas('grass')), true);
   const outerGeo = new THREE.PlaneGeometry(900, 900, 90, 90).rotateX(-Math.PI / 2);
-  outerGeo.setAttribute('emit', new THREE.Float32BufferAttribute(new Float32Array(outerGeo.attributes.position.count), 1));
-  const outer = new THREE.Mesh(outerGeo, retroMaterial({ tint: '#4f8f3e' }));
+  const ouv = outerGeo.attributes.uv;
+  for (let i = 0; i < ouv.count; i++) ouv.setXY(i, ouv.getX(i) * 900, ouv.getY(i) * 900);
+  const outer = new THREE.Mesh(outerGeo, groundMaterial({ map: mtex, color: '#b8c8a8' }));
   outer.position.set(OUTDOOR_W / 2, -0.12, MAP_H / 2);
   outer.receiveShadow = true;
   scene.add(outer);
@@ -214,32 +201,18 @@ export async function buildWorld(scene) {
       const d = Math.max(-x, x - OUTDOOR_W, -z, z - MAP_H);          // distance out from the route
       if (rnd(x, z, 1) > 0.9 - Math.min(0.5, d * 0.02)) continue;
       const k = kinds[hash(x, z) % kinds.length];
-      const g = await loadModel(k, index);
+      const { g } = await loadModel(k, index);
       const jx = x + rnd(x, z, 2) * 1.2 - 0.6;
       const jz = z + rnd(x, z, 3) * 1.2 - 0.6;
-      add(placed(g, jx, jz, 0, 0.9 + rnd(x, z, 4) * 0.5), jx, jz);
+      add(k, placed(g, jx, jz, 0, 0.9 + rnd(x, z, 4) * 0.5));
     }
   }
-  const propMat = retroMaterial();
-  for (const list of chunks.values()) {
-    const m = new THREE.Mesh(mergeGeometries(list), propMat);
+  for (const [name, list] of byModel) {
+    const m = new THREE.Mesh(mergeGeometries(list), modelMaterial(MODEL_CACHE.get(name).tex));
     m.castShadow = true;
     m.receiveShadow = true;
     scene.add(m);
   }
-  // far hills ringing the valley (low-poly, lost in the fog)
-  const hillMat = retroMaterial({ tint: '#3f7a4a' });
-  for (let i = 0; i < 26; i++) {
-    const a = (i / 26) * Math.PI * 2;
-    const r = 150 + rnd(i, 3) * 60;
-    const geo = new THREE.ConeGeometry(30 + rnd(i, 5) * 40, 20 + rnd(i, 7) * 45, 7, 1).toNonIndexed();
-    geo.setAttribute('emit', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count), 1));
-    const hill = new THREE.Mesh(geo, hillMat);
-    hill.position.set(OUTDOOR_W / 2 + Math.cos(a) * r, 0, MAP_H / 2 + Math.sin(a) * r * 1.2);
-    hill.rotation.y = rnd(i, 9) * 3;
-    scene.add(hill);
-  }
-
   // ---- lamps: warm glow sprites at night
   const glowTex = (() => {
     const c = document.createElement('canvas');
@@ -265,5 +238,5 @@ export async function buildWorld(scene) {
     glows.push(s);
   }
 
-  return { map, water, wtex, glows, grassMesh };
+  return { map, water, wtex, glows };
 }

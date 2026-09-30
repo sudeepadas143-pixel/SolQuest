@@ -93,30 +93,37 @@ illustrative. The trailer contains no contract address.
 ## Title-screen drone flight
 
 The game's main menu plays a looping drone flight over the overworld, rendered
-as a retro 3D world from the game's own data:
+as a 3D world from the game's own data:
 
 ```bash
-python3 drone/export_props.py     # the game's prop models (tools/props3d.py) -> 3D meshes (drone/assets/props)
+python3 drone/export_props.py     # the game's prop models (tools/props3d.py) -> textured 3D meshes (drone/assets/props)
 npm run dev                        # then open http://127.0.0.1:5174/drone.html?play for a live preview
-node render/drone.mjs              # 48 s seamless loop -> ../public/assets/title/drone.{mp4,webm} + poster.png
+node render/drone.mjs              # 48 s seamless loop, 4 workers, resumable -> ../public/assets/title/drone.{mp4,webm} + poster.png
 ```
 
-- **World** (`src/drone/world.js`): the map comes from the game's `buildMap()`, with
-  one ground quad per tile textured from the game's tileset. Every prop (houses,
-  the Elite Hall, the windmill, trees, hedges, fences, lamps, cars, tall grass) is
-  the game's own model from `tools/props3d.py`. `drone/export_props.py` captures
-  its triangles and ellipsoids instead of rasterising a sprite, subdivides each
-  surface, and bakes its procedural shader (shingles, bricks, windows, foliage)
-  into face colours. Windows and lamps keep their emissive flag and light up at night.
+- **Models** (`drone/export_props.py`):
+  - Every prop (the houses, the Elite Hall, the windmill, trees, hedges, fences,
+    lamps, cars, tall grass) is the game's own model from `tools/props3d.py`.
+  - Instead of rasterising a sprite, the exporter captures the model's
+    triangles and ellipsoids and bakes each surface's procedural shader
+    (shingles, bricks, siding, windows, foliage) into a texture atlas.
+  - The atlases use the sprites' own density (4 texels per unit), so the 3D
+    models carry the same detail as the game art.
+  - Windows and lamps are flagged in the atlas alpha and glow at night.
+- **World** (`src/drone/world.js`):
+  - The map comes from the game's `buildMap()`. The ground is the whole route
+    painted into one texture from the game's tileset (mipmapped, crisp up close).
+  - Water drifts, and tall grass sways in the wind.
 - **Look** (`src/drone/main.js`):
-  - The scene renders at 320x214 with vertices snapped to that pixel grid, and
-    affine texture mapping on the ground.
-  - The final pass adds 15-bit colour, a light ordered dither and a vignette.
-  - The lighting has hard-edged shadows, drifting clouds, fog and a sky dome.
-- **Flight**: a closed Catmull-Rom loop over the town, Market Square, Willow Pond,
-  the windmill, the orchard and the Elite Hall. The camera glances toward
-  landmarks as it passes them. One full day passes per loop (morning, golden
-  hour, night with lit windows and lamps, dawn), so the video loops seamlessly.
-- **In the game** (`src/scenes/TitleScene.js`): the poster shows at once, and the
-  video streams in, muted, scaled up 3x nearest-neighbour. It offers H.264 first
-  and VP9 as a fallback. If the video can't play, the poster stays as the backdrop.
+  - Renders at the game's 960x640 with 4x multisampling.
+  - Soft shadows from a 4096 shadow map, drifting clouds, fog, and a sky dome
+    with sun, moon and stars.
+- **Flight**:
+  - A closed Catmull-Rom loop over the town, Market Square, Willow Pond, the
+    windmill, the orchard and the Elite Hall.
+  - The camera turns (yaw only) toward landmarks as it passes them.
+  - One full day passes per loop (morning, golden hour, night with lit windows
+    and lamps, dawn), so the video loops seamlessly.
+- **In the game** (`src/scenes/TitleScene.js`): the poster shows at once and the
+  video streams in, muted. It offers H.264 first and VP9 as a fallback. If the
+  video can't play, the poster stays as the backdrop.

@@ -1,19 +1,15 @@
-// Drone flight over the SolQuest overworld, in a retro-3D style, for the title
-// screen. Deterministic: renderAt(t) draws the frame at time t of a seamless
-// LOOP-second loop (one full day passes on the way round).
-//
-// Retro look: the scene renders at 240x160 (a quarter of the game's 960x640),
-// vertices snap to that pixel grid, the ground uses affine texture mapping, and
-// a final pass quantises colour with a light ordered dither before a nearest-
-// neighbour upscale.
+// Drone flight over the SolQuest overworld for the title screen: the game's own
+// map, tiles and prop models as a 3D world. Deterministic: renderAt(t) draws the
+// frame at time t of a seamless LOOP-second loop (one full day passes on the
+// way round). Renders at the game's 960x640 with 4x multisampling; textures keep
+// the game art's crisp texels (nearest up close, mipmapped in the distance).
 import * as THREE from 'three';
 import { buildWorld, U } from './world.js';
 import { OUTDOOR_W, MAP_H } from '@game/data/map.js';
 
 THREE.ColorManagement.enabled = false;
 export const LOOP = 48;
-export const LOW = { w: 320, h: 214 };        // internal resolution (PS1-ish); the video is this, scaled x3
-const OUT = LOW;
+export const OUT = { w: 960, h: 640 };
 
 // ------------------------------------------------------------ time of day
 // The loop runs from mid-morning through the day, golden hour, night and dawn
@@ -83,30 +79,31 @@ export class Drone {
     r.setSize(OUT.w, OUT.h, false);
     r.outputColorSpace = THREE.LinearSRGBColorSpace;
     r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.BasicShadowMap;          // hard-edged, pixelly shadows
+    r.shadowMap.type = THREE.PCFShadowMap;
     this.renderer = r;
 
     const scene = new THREE.Scene();
     this.scene = scene;
-    this.camera = new THREE.PerspectiveCamera(56, LOW.w / LOW.h, 0.3, 420);
+    this.camera = new THREE.PerspectiveCamera(56, OUT.w / OUT.h, 0.3, 420);
     scene.fog = new THREE.Fog(0xcfe6ff, 40, 150);
 
     // sky dome: vertical gradient, sun/moon disc, stars
     this.skyU = { top: { value: new THREE.Color() }, horizon: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3() },
       sunCol: { value: new THREE.Color() }, night: { value: 0 } };
-    const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 24, 16), new THREE.ShaderMaterial({
+    const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 64, 32), new THREE.ShaderMaterial({
       uniforms: this.skyU, side: THREE.BackSide, depthWrite: false, fog: false,
       vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = modelViewMatrix * vec4(position,1.0); gl_Position = projectionMatrix * p; }',
       fragmentShader: `
         uniform vec3 top, horizon, sunCol, sunDir; uniform float night; varying vec3 vDir;
         float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719))) * 43758.5453); }
         void main(){
-          float y = clamp(vDir.y, -0.2, 1.0);
+          vec3 dir = normalize(vDir);
+          float y = clamp(dir.y, -0.2, 1.0);
           vec3 c = mix(horizon, top, smoothstep(-0.02, 0.55, y));
-          float d = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
+          float d = max(dot(dir, normalize(sunDir)), 0.0);
           c += sunCol * (smoothstep(0.9975, 0.999, d) * 1.2 + pow(d, 40.0) * 0.35);
           // stars
-          vec3 q = floor(normalize(vDir) * 180.0);
+          vec3 q = floor(dir * 180.0);
           float s = step(0.9975, h(q)) * night * smoothstep(0.05, 0.3, y);
           c += vec3(s);
           gl_FragColor = vec4(c, 1.0);
@@ -120,10 +117,11 @@ export class Drone {
     scene.add(this.hemi);
     const sun = new THREE.DirectionalLight(0xffffff, 1.2);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(4096, 4096);
     const sc = sun.shadow.camera;
-    sc.left = -46; sc.right = 46; sc.top = 46; sc.bottom = -46; sc.near = 1; sc.far = 260;
-    sun.shadow.bias = -0.0015;
+    sc.left = -40; sc.right = 40; sc.top = 40; sc.bottom = -40; sc.near = 1; sc.far = 260;
+    sun.shadow.bias = -0.0008;
+    sun.shadow.normalBias = 0.02;
     scene.add(sun, sun.target);
     this.sun = sun;
 
@@ -146,30 +144,17 @@ export class Drone {
 
     this.world = await buildWorld(scene);
 
-    // low-res target + the retro output pass
-    this.rt = new THREE.WebGLRenderTarget(LOW.w, LOW.h, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: true });
+    // multisampled target + a light output pass (vignette)
+    this.rt = new THREE.WebGLRenderTarget(OUT.w, OUT.h, { samples: 4, depthBuffer: true });
     this.post = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: this.rt.texture }, uRes: { value: new THREE.Vector2(LOW.w, LOW.h) } },
+      uniforms: { tDiffuse: { value: this.rt.texture } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
       fragmentShader: `
-        uniform sampler2D tDiffuse; uniform vec2 uRes; varying vec2 vUv;
-        float bayer(vec2 p){
-          int x = int(mod(p.x, 4.0)); int y = int(mod(p.y, 4.0));
-          int i = x + y * 4;
-          int m[16]; m[0]=0; m[1]=8; m[2]=2; m[3]=10; m[4]=12; m[5]=4; m[6]=14; m[7]=6;
-          m[8]=3; m[9]=11; m[10]=1; m[11]=9; m[12]=15; m[13]=7; m[14]=13; m[15]=5;
-          int v = 0; for (int k = 0; k < 16; k++) if (k == i) v = m[k];
-          return (float(v) + 0.5) / 16.0 - 0.5;
-        }
+        uniform sampler2D tDiffuse; varying vec2 vUv;
         void main(){
-          vec2 px = floor(vUv * uRes);
-          vec3 c = texture2D(tDiffuse, (px + 0.5) / uRes).rgb;
-          // 15-bit colour with a light ordered dither
-          float levels = 31.0;
-          c = floor(c * levels + 0.5 + bayer(px) * 0.35) / levels;
-          // soft vignette
+          vec3 c = texture2D(tDiffuse, vUv).rgb;
           vec2 q = vUv - 0.5;
-          c *= 1.0 - dot(q, q) * 0.55;
+          c *= 1.0 - dot(q, q) * 0.45;
           gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
         }`,
       depthTest: false, depthWrite: false,
@@ -177,7 +162,6 @@ export class Drone {
     this.postScene = new THREE.Scene();
     this.postScene.add(this.post);
     this.postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    U.uSnap.value.set(LOW.w / 2, LOW.h / 2);
     return true;
   }
 
@@ -194,19 +178,17 @@ export class Drone {
     const p = pointAt(u);
     const ahead = pointAt(u + 0.018);
     const dir = new THREE.Vector3().subVectors(ahead, p).setY(0).normalize();
-    const look = new THREE.Vector3().copy(p).addScaledVector(dir, p.y * 2.3).setY(0);
-    // glance towards landmarks nearby (smoothly weighted by distance)
-    let wsum = 0;
-    const lk = new THREE.Vector3();
+    // heading: along the path, turned towards landmarks nearby (yaw only, so
+    // the tilt stays the same and the horizon stays in frame)
+    const head = dir.clone();
     for (const [sx, sz, r] of SIGHTS) {
       const d = Math.hypot(sx - p.x, sz - p.z);
-      const w = Math.max(0, 1 - d / r) * 1.1;
-      if (w > 0) { lk.x += sx * w; lk.z += sz * w; wsum += w; }
+      const w = Math.min(0.8, Math.max(0, 1 - d / r) * 1.1);
+      if (w <= 0 || d < 0.5) continue;
+      const to = new THREE.Vector3(sx - p.x, 0, sz - p.z).normalize();
+      head.lerp(to, w).normalize();
     }
-    if (wsum > 0) {
-      const k = Math.min(0.8, wsum);
-      look.lerp(new THREE.Vector3(lk.x / wsum, 0, lk.z / wsum), k);
-    }
+    const look = new THREE.Vector3().copy(p).addScaledVector(head, p.y * 2.3).setY(0);
     cam.position.copy(p);
     cam.up.set(0, 1, 0);
     cam.lookAt(look);
@@ -214,7 +196,7 @@ export class Drone {
     const a2 = pointAt(u + 0.036);
     const d2 = new THREE.Vector3().subVectors(a2, ahead).setY(0).normalize();
     const turn = dir.x * d2.z - dir.z * d2.x;
-    cam.rotateZ(THREE.MathUtils.clamp(-turn * 1.6, -0.22, 0.22));
+    cam.rotateZ(THREE.MathUtils.clamp(-turn * 0.9, -0.12, 0.12));
 
     // sun (or moon) across the sky
     const ang = ((hour - 6) / 12) * Math.PI;                  // 6h rise in the east, 18h set in the west

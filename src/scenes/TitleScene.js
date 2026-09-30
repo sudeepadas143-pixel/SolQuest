@@ -1,9 +1,8 @@
 // Title: a drone flight over the SolQuest overworld. The footage is the game's
-// own map and prop models rendered as a retro 3D world (trailer/src/drone, see
-// trailer/render/drone.mjs) - a seamless loop through one whole day, streamed
-// as a muted video and scaled up x3 with nearest-neighbour so every retro pixel
-// stays crisp. The first frame is shown instantly and stays as the backdrop if
-// the video can't play.
+// own map, tiles and prop models rendered as a 3D world (trailer/src/drone, see
+// trailer/render/drone.mjs) - a seamless loop through one whole day at the
+// game's 960x640, streamed as a muted video. The first frame is shown instantly
+// and stays as the backdrop if the video can't play.
 import Phaser from 'phaser';
 import { GAME_W, GAME_H, GAME_TITLE } from '../config.js';
 import { hasSave, loadSave, deleteSave } from '../systems/save.js';
@@ -15,7 +14,6 @@ import { panel, text } from '../ui/theme.js';
 import { fadeTo, yesNo } from '../ui/helpers.js';
 
 const VIDEO = `${import.meta.env.BASE_URL}assets/title/drone`;
-const SCALE = 3;                                    // the footage is 320x214
 
 export class TitleScene extends Phaser.Scene {
   constructor() { super('Title'); }
@@ -25,8 +23,8 @@ export class TitleScene extends Phaser.Scene {
     music('title');
 
     // --- the world: poster frame now, the drone flight as soon as it streams in
-    this.add.image(GAME_W / 2, GAME_H / 2, 'title_poster').setScale(SCALE);
-    this.flight = this.add.video(GAME_W / 2, GAME_H / 2).setScale(SCALE).setAlpha(0);
+    this.add.image(GAME_W / 2, GAME_H / 2, 'title_poster');
+    this.flight = this.add.video(GAME_W / 2, GAME_H / 2).setAlpha(0);
     // H.264 for Safari / iOS, VP9 for browsers without H.264; muted so it autoplays everywhere
     this.flight.loadURL([`${VIDEO}.mp4`, `${VIDEO}.webm`], true);
     this.flight.play(true);
