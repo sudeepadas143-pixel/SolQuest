@@ -89,3 +89,34 @@ renders a slice.
 Made for the trailer only: the leaderboard and pool graphics, and
 the damage numbers. The leaderboard names, times, pool amount and trades are
 illustrative. The trailer contains no contract address.
+
+## Title-screen drone flight
+
+The game's main menu plays a looping drone flight over the overworld, rendered
+as a retro 3D world from the game's own data:
+
+```bash
+python3 drone/export_props.py     # the game's prop models (tools/props3d.py) -> 3D meshes (drone/assets/props)
+npm run dev                        # then open http://127.0.0.1:5174/drone.html?play for a live preview
+node render/drone.mjs              # 48 s seamless loop -> ../public/assets/title/drone.{mp4,webm} + poster.png
+```
+
+- **World** (`src/drone/world.js`): the map comes from the game's `buildMap()`, with
+  one ground quad per tile textured from the game's tileset. Every prop (houses,
+  the Elite Hall, the windmill, trees, hedges, fences, lamps, cars, tall grass) is
+  the game's own model from `tools/props3d.py`. `drone/export_props.py` captures
+  its triangles and ellipsoids instead of rasterising a sprite, subdivides each
+  surface, and bakes its procedural shader (shingles, bricks, windows, foliage)
+  into face colours. Windows and lamps keep their emissive flag and light up at night.
+- **Look** (`src/drone/main.js`):
+  - The scene renders at 320x214 with vertices snapped to that pixel grid, and
+    affine texture mapping on the ground.
+  - The final pass adds 15-bit colour, a light ordered dither and a vignette.
+  - The lighting has hard-edged shadows, drifting clouds, fog and a sky dome.
+- **Flight**: a closed Catmull-Rom loop over the town, Market Square, Willow Pond,
+  the windmill, the orchard and the Elite Hall. The camera glances toward
+  landmarks as it passes them. One full day passes per loop (morning, golden
+  hour, night with lit windows and lamps, dawn), so the video loops seamlessly.
+- **In the game** (`src/scenes/TitleScene.js`): the poster shows at once, and the
+  video streams in, muted, scaled up 3x nearest-neighbour. It offers H.264 first
+  and VP9 as a fallback. If the video can't play, the poster stays as the backdrop.

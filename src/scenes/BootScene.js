@@ -31,6 +31,8 @@ export class BootScene extends Phaser.Scene {
       this.load.image(`player_${g}_full`, `${BASE}sprites/${e.full}`);
     }
     this.load.image('tileset', `${BASE}tiles/tileset.png`);
+    // title screen: first frame of the drone flight (the video itself streams in the Title scene)
+    this.load.image('title_poster', `${BASE}title/poster.png`);
     for (const k of Object.keys(tilesMeta.props)) this.load.image(k, `${BASE}tiles/${k}.png`);
   }
 
