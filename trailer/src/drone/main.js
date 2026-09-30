@@ -10,6 +10,7 @@ import { OUTDOOR_W, MAP_H } from '@game/data/map.js';
 THREE.ColorManagement.enabled = false;
 export const LOOP = 48;
 export const OUT = { w: 960, h: 640 };
+const SHIFT = -0.46;                          // vertical lens shift (NDC): look down without tilting
 
 // ------------------------------------------------------------ time of day
 // The loop runs from mid-morning through the day, golden hour, night and dawn
@@ -84,7 +85,7 @@ export class Drone {
 
     const scene = new THREE.Scene();
     this.scene = scene;
-    this.camera = new THREE.PerspectiveCamera(56, OUT.w / OUT.h, 0.3, 420);
+    this.camera = new THREE.PerspectiveCamera(46, OUT.w / OUT.h, 0.3, 420);
     scene.fog = new THREE.Fog(0xcfe6ff, 40, 150);
 
     // sky dome: vertical gradient, sun/moon disc, stars
@@ -126,12 +127,13 @@ export class Drone {
     this.sun = sun;
 
     // clouds: flattened low-poly puffs drifting over (they shade the ground)
-    const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+    const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true, emissive: 0x000000 });
+    this.cloudMat = cloudMat;
     this.clouds = new THREE.Group();
     for (let i = 0; i < 18; i++) {
       const g = new THREE.Group();
       for (let k = 0; k < 4; k++) {
-        const b = new THREE.Mesh(new THREE.IcosahedronGeometry(2.2 + ((i * 7 + k * 3) % 5) * 0.6, 0), cloudMat);
+        const b = new THREE.Mesh(new THREE.IcosahedronGeometry(2.2 + ((i * 7 + k * 3) % 5) * 0.6, 1), cloudMat);
         b.position.set(k * 2.4 - 3.6, ((i + k) % 3) * 0.4, ((k * 5 + i) % 3) - 1);
         b.scale.set(1.3, 0.55, 1);
         b.castShadow = true;
@@ -188,15 +190,16 @@ export class Drone {
       const to = new THREE.Vector3(sx - p.x, 0, sz - p.z).normalize();
       head.lerp(to, w).normalize();
     }
-    const look = new THREE.Vector3().copy(p).addScaledVector(head, p.y * 2.3).setY(0);
+    // Architectural framing: the camera itself only tilts down a little and a
+    // lens shift frames the ground below, so vertical lines (the Hall's
+    // columns, walls, trees) stay upright instead of splaying apart. No roll.
+    const look = new THREE.Vector3().copy(p).addScaledVector(head, p.y * 4.2).setY(0);
     cam.position.copy(p);
     cam.up.set(0, 1, 0);
     cam.lookAt(look);
-    // bank into the turns
-    const a2 = pointAt(u + 0.036);
-    const d2 = new THREE.Vector3().subVectors(a2, ahead).setY(0).normalize();
-    const turn = dir.x * d2.z - dir.z * d2.x;
-    cam.rotateZ(THREE.MathUtils.clamp(-turn * 0.9, -0.12, 0.12));
+    cam.updateProjectionMatrix();
+    cam.projectionMatrix.elements[9] = SHIFT;
+    cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
 
     // sun (or moon) across the sky
     const ang = ((hour - 6) / 12) * Math.PI;                  // 6h rise in the east, 18h set in the west
@@ -224,7 +227,9 @@ export class Drone {
       const x = ((d.x + t * 0.9) % 130) - 30;
       c.position.set(x, d.y, d.z);
     }
-    this.clouds.children[0].children[0].material.color.setRGB(0.95, 0.95, 1).multiplyScalar(0.45 + 0.55 * (1 - night));
+    // clouds pick up the sky: lit by the sun, filled with the horizon colour
+    this.cloudMat.emissive.copy(S.horizon).multiplyScalar(0.55);
+    this.cloudMat.color.setRGB(1, 1, 1).multiplyScalar(0.5 + 0.5 * (1 - night));
 
     // water drifts, lamps glow after dark
     this.world.wtex.offset.set((t * 0.05) % 1, (t * 0.03) % 1);
