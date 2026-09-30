@@ -98,7 +98,9 @@ as a 3D world from the game's own data:
 ```bash
 python3 drone/export_props.py     # the game's prop models (tools/props3d.py) -> textured 3D meshes (drone/assets/props)
 npm run dev                        # then open http://127.0.0.1:5174/drone.html?play for a live preview
-node render/drone.mjs              # 48 s seamless loop, 4 workers, resumable -> ../public/assets/title/drone.{mp4,webm} + poster.jpg
+node render/drone.mjs              # 48 s loop, 4 workers, resumable -> ../public/assets/title/drone.{mp4,webm} + poster.jpg
+node render/drone_seam.mjs && python3 drone/blend_seam.py && node render/drone.mjs --encode --crf 28
+                                   # render 1 s past the end and cross-fade it into the start: a seamless wrap
 ```
 
 - **Models** (`drone/export_props.py`):
