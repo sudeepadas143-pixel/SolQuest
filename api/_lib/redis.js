@@ -1,14 +1,28 @@
-// Storage for the leaderboard: Upstash Redis over its REST API (add "Upstash
-// for Redis" to the Vercel project from the Marketplace; it sets
-// KV_REST_API_URL / KV_REST_API_TOKEN, or UPSTASH_REDIS_REST_URL / _TOKEN).
-// Without those, local dev and tests use a small in-memory stand-in that
-// speaks the same handful of commands. In production a missing store is an
-// error (the API answers 503) - never a silent in-memory board.
+// Storage for the leaderboard, one of:
+//  - Upstash Redis over its REST API, when KV_REST_API_URL / KV_REST_API_TOKEN
+//    (or UPSTASH_REDIS_REST_URL / _TOKEN) are set;
+//  - Vercel Blob, when BLOB_READ_WRITE_TOKEN is set: the whole board is one
+//    private JSON file. Each request loads it once, runs its commands on that
+//    copy, and saves it with an ETag check - if another request saved in
+//    between, the request runs again on the fresh copy, so nothing is lost;
+//  - in local dev and tests, the same command emulation in memory.
+// In production with none of these the API answers 503 - never a silent
+// in-memory board.
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 const URL_ = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+const DB_PATH = 'leaderboard/db.json';
 
 export const storeConfigured = () => !!(URL_ && TOKEN);
+export const blobConfigured = () => !!process.env.BLOB_READ_WRITE_TOKEN;
 const allowMemory = () => process.env.LEADERBOARD_MEMORY === '1' || process.env.NODE_ENV !== 'production';
+
+// the keyspace the emulated commands work on: per request with Blob, shared in memory
+const local = { mem: new Map(), expiry: new Map(), dirty: false };
+const als = new AsyncLocalStorage();
+const S = () => als.getStore() ?? local;
+const WRITES = new Set(['SET', 'DEL', 'INCR', 'EXPIRE', 'HSET', 'HDEL', 'ZADD', 'ZREM', 'LPUSH', 'LREM']);
 
 /** Run one Redis command, e.g. cmd('ZADD', 'lb:s1', 123, 'wallet'). */
 export async function cmd(...args) {
@@ -22,28 +36,92 @@ export async function cmd(...args) {
     if (j.error) throw new Error(`redis: ${j.error}`);
     return j.result;
   }
-  if (!allowMemory()) {
+  if (!als.getStore() && !allowMemory()) {
     const e = new Error('Leaderboard storage is not configured');
     e.status = 503;
     throw e;
   }
-  return memory(args.map(String));
+  const a = args.map(String);
+  if (WRITES.has(a[0].toUpperCase())) S().dirty = true;
+  return memory(a);
+}
+
+// ---------------------------------------------------------------- blob store --
+function serialize({ mem, expiry }) {
+  const out = {};
+  for (const [k, v] of mem) {
+    const e = expiry.get(k) ?? null;
+    if (e && e < Date.now()) continue;
+    if (typeof v === 'string') out[k] = { t: 's', v, e };
+    else if (Array.isArray(v)) out[k] = { t: 'l', v, e };
+    else out[k] = { t: v.zset ? 'z' : 'h', v: [...v], e };
+  }
+  return out;
+}
+
+function deserialize(data) {
+  const mem = new Map();
+  const expiry = new Map();
+  for (const [k, { t, v, e }] of Object.entries(data ?? {})) {
+    if (t === 's' || t === 'l') mem.set(k, v);
+    else { const m = new Map(v); if (t === 'z') m.zset = true; mem.set(k, m); }
+    if (e) expiry.set(k, e);
+  }
+  return { mem, expiry, dirty: false };
+}
+
+/** Run a request's handler against the store. With Blob, that's one
+ *  load / run / conditional save, retried when another request got there first. */
+let blobSdk = null;
+/** Tests swap in a stand-in for @vercel/blob. */
+export function useBlobSdk(sdk) { blobSdk = sdk; }
+
+export async function transaction(fn) {
+  if (storeConfigured() || !blobConfigured()) return fn();
+  const { get, put, BlobPreconditionFailedError, BlobNotFoundError } = blobSdk ?? await import('@vercel/blob');
+  for (let attempt = 0; attempt < 8; attempt++) {
+    let cur = null;
+    try { cur = await get(DB_PATH, { access: 'private', useCache: false }); } catch (e) { if (!(e instanceof BlobNotFoundError)) throw e; }
+    const etag = cur?.blob?.etag ?? null;
+    const data = cur?.stream ? JSON.parse(await new Response(cur.stream).text()) : {};
+    const state = deserialize(data);
+    const out = await als.run(state, fn);
+    if (!state.dirty) return out;
+    try {
+      // an update only lands on the version we read (ifMatch); the very first
+      // save is create-only (no overwrite), so two first writers can't both win
+      await put(DB_PATH, JSON.stringify(serialize(state)), {
+        access: 'private', contentType: 'application/json', addRandomSuffix: false,
+        ...(etag ? { ifMatch: etag, allowOverwrite: true } : { allowOverwrite: false }),
+      });
+      return out;
+    } catch (e) {
+      // lost the race: someone saved since we read. (A failed create reports a
+      // generic error, so check whether the file appeared meanwhile.)
+      const raced = e instanceof BlobPreconditionFailedError
+        || (!etag && await get(DB_PATH, { access: 'private', useCache: false }).then((r) => !!r, () => false));
+      if (!raced) throw e;
+      await new Promise((r) => setTimeout(r, 40 + Math.random() * 120 * (attempt + 1)));
+    }
+  }
+  const e = new Error('The leaderboard is busy. Try again in a moment.');
+  e.status = 503;
+  throw e;
 }
 
 // ------------------------------------------------------------------ memory --
-const mem = new Map();
-const expiry = new Map();
-
 function live(k) {
+  const { mem, expiry } = S();
   const t = expiry.get(k);
   if (t && t < Date.now()) { mem.delete(k); expiry.delete(k); }
   return mem.get(k);
 }
 
-export function resetMemory() { mem.clear(); expiry.clear(); }
+export function resetMemory() { local.mem.clear(); local.expiry.clear(); }
 
 function memory([c, ...a]) {
   const C = c.toUpperCase();
+  const { mem, expiry } = S();
   switch (C) {
     case 'GET': { const v = live(a[0]); return typeof v === 'string' ? v : null; }
     case 'SET': {
@@ -63,7 +141,7 @@ function memory([c, ...a]) {
     case 'HDEL': { const h = live(a[0]); let n = 0; if (h) for (const f of a.slice(1)) if (h.delete(f)) n++; return n; }
     case 'HGETALL': { const h = live(a[0]); return h ? [...h].flat() : []; }
     case 'ZADD': {
-      const z = live(a[0]) ?? new Map(); mem.set(a[0], z);
+      const z = live(a[0]) ?? new Map(); z.zset = true; mem.set(a[0], z);
       let i = 1; const flags = new Set();
       while (['LT', 'GT', 'NX', 'XX', 'CH'].includes(a[i]?.toUpperCase())) flags.add(a[i++].toUpperCase());
       let n = 0;

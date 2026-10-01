@@ -1,5 +1,8 @@
 // Wraps a core handler ({query, body, ip} -> {status, body}) as a Vercel
 // Node function, which is also how the Vite dev/preview middleware calls it.
+// Each request runs as one store transaction (see redis.js).
+import { transaction } from './redis.js';
+
 export function route(methods, fn) {
   return async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store');
@@ -15,7 +18,7 @@ export function route(methods, fn) {
       let body = req.body;
       if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
       const ip = String(req.headers['x-forwarded-for'] ?? req.socket?.remoteAddress ?? 'local').split(',')[0].trim();
-      const out = await fn({ query, body: body ?? {}, ip });
+      const out = await transaction(() => fn({ query, body: body ?? {}, ip }));
       res.statusCode = out.status;
       res.end(JSON.stringify(out.body));
     } catch (e) {

@@ -23,23 +23,27 @@ sets the Vite preset: `npm run build` builds to `dist/`. The game itself is a st
 site. The leaderboard and earnings screens use the serverless functions in `api/`,
 which need a store and an admin key.
 
-### Leaderboard and earnings setup (once)
+### Leaderboard and earnings storage
 
-1. **Add a store.** In the Vercel project, go to Storage, then Marketplace, then
-   **Upstash for Redis** (free tier is fine). Connect it to the project. It adds
-   `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
-2. **Set an admin key.** In Settings, then Environment Variables, add `ADMIN_KEY`.
-   Use a long random string and keep it private.
-3. **Redeploy.**
-4. **Set the season.** Open `https://<your-site>/admin.html` and enter the key.
-   Set the season name, prize pool (SOL), the split for the paid places and
-   (optionally) an end date.
-5. **Review and pay.** As runs come in, verify or reject them there. After paying
-   someone, record the payout there too, with its transaction signature. Players see
-   it under EARNINGS.
+The `api/` functions keep the board in one of two places:
+- **Vercel Blob** (`BLOB_READ_WRITE_TOKEN`). This is what the live project uses: a
+  private store, `solquest-leaderboard`, connected to the project. The board is a
+  single private JSON file, saved with an ETag check so simultaneous submissions
+  never overwrite each other.
+- **Upstash Redis** (`KV_REST_API_URL` / `KV_REST_API_TOKEN`), if you ever add it
+  from the Marketplace. It takes priority over Blob when set.
 
-Without a store, `/api` answers "offline", and the game's LEADERBOARD and EARNINGS
-screens say so. Everything else plays normally.
+`ADMIN_KEY` (a sensitive environment variable) unlocks `https://<your-site>/admin.html`.
+There you set the season, prize pool and split, verify or reject runs, and record
+payouts with their transaction signature. Players see these under EARNINGS.
+
+For a new deployment elsewhere:
+1. Create a Blob store (Storage, then Blob, private) and connect it to the project.
+2. Add `ADMIN_KEY`.
+3. Redeploy.
+
+Without a store, `/api` answers 503: the game's LEADERBOARD and EARNINGS screens
+say "offline" and everything else plays normally.
 
 **Community links:** put the X profile and the token's contract address in
 `src/data/community.js`. Until then the menu shows "coming soon".
@@ -75,6 +79,7 @@ node tools/mobile_check.mjs   # phone emulation: no double-tap zoom, hold-B runn
 node tools/name_entry_check.mjs out/   # phone emulation: name entry via OK button and A
 node tools/townsfolk_check.mjs out/    # townspeople: talk by key and click, wander bounds (VITE_DEBUG=1 build on :4173)
 node tools/api_tests.mjs               # leaderboard / earnings API logic (in-memory store, no browser)
+node tools/blob_store_tests.mjs        # the Blob store: persistence and simultaneous writes (stand-in Blob API)
 node tools/leaderboard_check.mjs out/  # main menu: community, leaderboard, earnings against the local API
 ```
 

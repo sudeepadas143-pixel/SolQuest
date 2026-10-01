@@ -117,7 +117,17 @@ Until then, treat the leaderboard as unverified and check the top runs by hand
 
 The menu now has **LEADERBOARD** (the season's fastest clears) and **EARNINGS**
 (a wallet's rank, best time, projected payout and the payouts it has received).
-Both are backed by `api/`, Vercel functions over Upstash Redis.
+Both are backed by `api/`, Vercel functions.
+
+**Storage.** The functions talk a small Redis-command subset (`api/_lib/redis.js`). Live, that runs on **Vercel Blob**:
+- the whole board is one private file, `leaderboard/db.json`;
+- each request loads it once, runs its commands on that copy and saves it conditionally (ETag `ifMatch`, create-only for the first save);
+- a request that lost a race re-runs on the fresh copy;
+- `tools/blob_store_tests.mjs` races six submissions against a stand-in with real ETag semantics.
+
+Upstash Redis is used instead if its env vars are set. Locally, the same commands run in memory.
+
+The single file is fine for thousands of runs. If the game grows past that, move to Upstash (no code changes; just add it in the Marketplace).
 
 **Runs**
 - A run is sent automatically when Cooker falls; the Hall of Fame shows the rank.
