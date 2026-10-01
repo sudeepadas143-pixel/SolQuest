@@ -72,7 +72,7 @@ bottom-right corner; each control drops off it once you've used it a few times,
 and it's gone once you know them all (remembered per browser).
 
 Walk into a trainer to battle them. Walk up into a door to enter. Walk through the
-Elite Hall's doors, up the carpet and the grand staircase to face Cooker. **The Solace** (the rest
+Elite Hall's doors, up the grand staircase and along the carpet to face Cooker. **The Solace** (the rest
 stop) heals your team, saves the game, and sets your respawn point.
 
 ## Game flow
@@ -91,10 +91,11 @@ The route runs south to north:
   They slam shut behind you and the Hall is dark. You can't run on the carpet.
   Letterbox bars close in, a heartbeat theme plays, and the cold braziers along
   the aisle catch fire pair by pair as you pass. Halfway up, the music speeds up.
-  There's no narration: the dark and the flames carry it. A grand staircase
-  climbs to the raised dais. At the top the HUD falls away, the camera rises to
-  the gold gate in the back wall, light leaks round its doors and they open:
-  **Cooker** steps out of the light as every flame flares. Winning leaves that
+  There's no narration: the dark and the flames carry it. From the entrance
+  foyer a wide marble staircase climbs to the Hall's raised main floor; walk
+  forward up the carpet toward the dais and the HUD falls away, the camera
+  rises to the gold gate in the back wall, light leaks round its doors and they
+  open: **Cooker** steps out of the light as every flame flares. Winning leaves that
   gate open onto the **Hall of Fame**.
 
 The four route Elites are TJR, Ansem, Orangie and Cented, in a seeded order per

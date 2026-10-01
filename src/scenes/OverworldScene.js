@@ -812,8 +812,8 @@ export class OverworldScene extends Phaser.Scene {
     if (this.hallDust) this.hallDust.emitting = this.indoors;
   }
 
-  /** Up the stairs and onto the dais: the gate behind it opens and Cooker
-   *  walks out of the light to meet you. */
+  /** Up the stairs and forward up the carpet: the gate behind the dais opens
+   *  and Cooker walks out of the light to meet you. */
   cookerArrives() {
     this.cookerMet = true;
     this.runLocked(async () => {
@@ -993,7 +993,7 @@ export class OverworldScene extends Phaser.Scene {
         if (n === 1) music('hallWalk2');             // halfway: the heart speeds up
       }
     });
-    if (y <= HALL.stage.daisY1) { this.cookerArrives(); return true; }
+    if (y <= HALL.revealRow) { this.cookerArrives(); return true; }
     return false;
   }
 

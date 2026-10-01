@@ -65,13 +65,13 @@ export function buildMap() {
     if (p.sign) signs.set(key(p.x, p.y), p.sign);
   }
 
-  // the Hall's raised dais and staircase: heights (model units) per tile, and
+  // the Hall's raised floor and staircase: heights (model units) per tile, and
   // the balustrades block. Movement only steps between tiles of similar
-  // height (see canStep), so the dais is reached by the stairs alone.
+  // height (see canStep), so the floor is reached by the stairs alone.
   const elev = Array.from({ length: MAP_H }, () => new Float32Array(MAP_W));
   const st = HALL.stage;
   if (st) {
-    for (let y = st.daisY0; y <= st.daisY1; y++) for (let x = st.x0; x <= st.x1; x++) elev[y][x] = st.height;
+    for (let y = st.floorY0; y <= st.floorY1; y++) for (let x = st.x0; x <= st.x1; x++) elev[y][x] = st.height;
     const s = st.stairs;
     const rows = s.y1 - s.y0 + 1;
     for (let y = s.y0; y <= s.y1; y++) {

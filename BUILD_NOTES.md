@@ -466,13 +466,15 @@ same level for Cooker.
   never squash). About-turns flash the side frame; starting a run or reversing
   mid-run kicks up dust; the shadow tightens on airborne frames; sand takes
   footprints.
-- **The Elite Hall's grand staircase.** `props3d.hall_stage` (dais raised 16
-  units, eight carpeted steps, marble balustrades with gold rails) and
-  `hall_gate` (closed / open). The map carries a height per tile
-  (`HALL.stage`, `map.elev`); sprites are lifted by it while depth sorts on the
-  ground, and steps only join tiles of similar height, so the dais is reached
-  by the stairs alone. Cooker now waits behind the gate: reaching the dais
-  opens it and he walks out (`cookerArrives()`).
+- **The Elite Hall's grand staircase.** You enter a ground-level foyer; a
+  wide marble staircase (13 tiles, ten steps, the carpet running up the middle
+  with gold stair rods, balustrades with gold rails and finials) climbs to the
+  raised main floor (`props3d.hall_stage`: floor, dais, stairs in one model).
+  The map carries a height per tile (`HALL.stage`, `map.elev`); sprites are
+  lifted by it while depth sorts on the ground, and steps only join tiles of
+  similar height, so the floor is reached by the stairs alone. The braziers
+  catch as you enter, as you climb and as you walk on; past `HALL.revealRow`
+  the gate behind the dais opens and Cooker walks out (`cookerArrives()`).
 - **Ambient life** (`scenes/ambient.js`): the windmill turns (eight sail
   frames), chimneys smoke, the fountain plays, the pond ripples and a fish
   jumps, butterflies, pecking birds that scatter, flocks overhead, falling

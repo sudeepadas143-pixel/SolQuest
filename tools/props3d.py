@@ -1033,48 +1033,90 @@ def riser_shader():
 
 
 def hall_stage():
-    """The raised dais and its grand staircase (footprint 11 x 6 tiles: the
-    dais is the back three rows, the stairs the front three, centred on the
-    carpet). Flat-topped and walkable - drawn under the characters."""
+    """The Elite Hall's raised main floor and the wide marble staircase up to it
+    from the entrance foyer (footprint 15 x 14 tiles, from the dais row down to
+    the foot of the stairs). The floor: checkered marble, the red carpet up the
+    middle, the lilac dais at the back. The stairs: ten wide marble steps with
+    the carpet running up them (gold stair rods), marble balustrades with gold
+    rails and finials at both sides. Walkable - drawn under the characters."""
     m = Model()
-    W, D = 11 * T, 6 * T
-    top_y = 3 * T                         # dais front edge / top of the stairs
-    lane0, lane1 = 4 * T, 7 * T           # the carpet lane (3 tiles)
+    W, D = 15 * T, 14 * T
+    top_y = 10 * T                         # top of the stairs (front edge of the raised floor)
+    lane0, lane1 = 6 * T, 9 * T            # the carpet (3 tiles)
+    dais = (2 * T, 13 * T, 3 * T)          # x0, x1, front edge (y)
+    light, dark = c('#eae6f2'), c('#cec8de')
+    lilac = c('#ded6ec')
+    gold = c(GOLD_HEX)
+    carpet = carpet_shader(lane0, lane1)
+    carpet_r = carpet_shader(lane0, lane1, riser=True)
+
+    def floor(P, uv, n):
+        x, y = P[:, 0], P[:, 1]
+        check = ((np.floor(x / T) + np.floor(y / T)) % 2 == 0)
+        out = np.where(check[:, None], light, dark)
+        j = (I.hash3(np.floor(x / 3), np.floor(y / 3), 0, 71) - 0.5) * 7
+        out = out + j[:, None]
+        sheen = ((x - y * 1.3) % 48) < 3
+        out = np.where(sheen[:, None], np.minimum(255, out * 1.05), out)
+        seam = ((x % T) < 0.45) | ((y % T) < 0.45)
+        out = np.where(seam[:, None], out * 0.9, out)
+        on_dais = (x >= dais[0]) & (x <= dais[1]) & (y <= dais[2])
+        out = np.where(on_dais[:, None], lilac, out)
+        rim = on_dais & ((np.abs(x - dais[0] - 3) < 0.7) | (np.abs(x - dais[1] + 3) < 0.7) | (np.abs(y - dais[2] + 3) < 0.7))
+        out = np.where(rim[:, None], gold, out)
+        lane = (x >= lane0) & (x <= lane1)
+        if lane.any():
+            out[lane] = carpet(P[lane], uv[lane], n)[0]
+        return np.clip(out, 0, 255), None
+
+    def tread(riser):
+        stone = I.flat('#ece8f4' if not riser else '#aaa0c2', jitter=2)
+
+        def sh(P, uv, n):
+            out, _ = stone(P, uv, n)
+            if riser:          # a fine shadow line under each nosing
+                top = uv[:, 1] > (uv[:, 1].max() - 0.5) if len(uv) else np.zeros(0, bool)
+                out = np.where(top[:, None], out * 0.85, out)
+            lane = (P[:, 0] >= lane0) & (P[:, 0] <= lane1)
+            if lane.any():
+                out[lane] = (carpet_r if riser else carpet)(P[lane], uv[lane], n)[0]
+            return out, None
+        return sh
+
     marble = I.flat('#efeaf6', jitter=2)
-    gold = I.flat(GOLD_HEX)
-    # the dais
-    m.box(0, 0, 0, W, top_y, STAGE_H, I.flat('#8a74b4'), top=dais_top_shader(0, W, 0, top_y, lane0, lane1),
-          south=riser_shader())
-    # the stairs: one block per step, its top the tread and its front the riser
-    run = (D - top_y) / STEPS
-    rise = STAGE_H / STEPS
-    for k in range(STEPS):
+    goldf = I.flat(GOLD_HEX)
+    # the raised floor (its front is hidden behind the stairs)
+    m.box(0, 0, 0, W, top_y, STAGE_H, I.flat('#8a74b4'), top=floor)
+    # the staircase: wide marble steps, the carpet running up the middle
+    steps = 10
+    run = (D - top_y) / steps
+    rise = STAGE_H / steps
+    for k in range(steps):
         y0 = top_y + k * run
         zt = STAGE_H - (k + 1) * rise
-        m.box(lane0, y0, 0, lane1, y0 + run, max(0.01, zt), carpet_shader(lane0, lane1, riser=True),
-              top=carpet_shader(lane0, lane1), south=carpet_shader(lane0, lane1, riser=True))
-    # balustrades: low marble walls following the slope, gold rail on top
+        m.box(T, y0, 0, W - T, y0 + run, max(0.01, zt), tread(True), top=tread(False), south=tread(True))
+    # balustrades down both sides
     def zt_at(y):
-        return 9 + STAGE_H * (D - y) / (D - top_y)
-    for xa, xb in ((lane0 - 7, lane0), (lane1, lane1 + 7)):
-        ya, yb = top_y, D - 2
+        return 10 + STAGE_H * (D - y) / (D - top_y)
+    for xa, xb in ((5, T), (W - T, W - 5)):
+        ya, yb = top_y, D - 3
         za, zb = zt_at(ya), zt_at(yb)
-        for xx, sgn in ((xa, -1), (xb, 1)):          # side faces
-            m.quad((xx, yb, 0), (xx, ya, 0), (xx, ya, za), (xx, yb, zb), marble)
-        m.quad((xa, yb, 0), (xb, yb, 0), (xb, yb, zb), (xa, yb, zb), marble)      # front end
-        m.quad((xa, yb, zb), (xb, yb, zb), (xb, ya, za), (xa, ya, za), marble)    # sloped top
-        r0, r1 = (xa + xb) / 2 - 2.4, (xa + xb) / 2 + 2.4                         # the gold rail
-        m.quad((r0, yb, zb + 1.6), (r1, yb, zb + 1.6), (r1, ya, za + 1.6), (r0, ya, za + 1.6), gold)
-        m.quad((r0, yb, zb), (r1, yb, zb), (r1, yb, zb + 1.6), (r0, yb, zb + 1.6), gold)
-        m.quad((r0, yb, zb), (r0, ya, za), (r0, ya, za + 1.6), (r0, yb, zb + 1.6), gold)
-        m.quad((r1, ya, za), (r1, yb, zb), (r1, yb, zb + 1.6), (r1, ya, za + 1.6), gold)
+        m.quad((xa, yb, 0), (xa, ya, 0), (xa, ya, za), (xa, yb, zb), marble)
+        m.quad((xb, ya, 0), (xb, yb, 0), (xb, yb, zb), (xb, ya, za), marble)
+        m.quad((xa, yb, 0), (xb, yb, 0), (xb, yb, zb), (xa, yb, zb), marble)
+        m.quad((xa, yb, zb), (xb, yb, zb), (xb, ya, za), (xa, ya, za), marble)
         cx = (xa + xb) / 2
-        # newel posts with gold finials: at the foot, and up on the dais
-        m.box(cx - 4.5, D - 9, 0, cx + 4.5, D, zb + 5, marble, top=gold)
-        m.ellipsoid((cx, D - 4.5, zb + 8), (2.8, 2.4, 2.8), gold)
-        m.box(cx - 4, top_y - 7, STAGE_H, cx + 4, top_y + 1, STAGE_H + 15, marble, top=gold)
-        m.ellipsoid((cx, top_y - 3, STAGE_H + 18), (2.6, 2.2, 2.6), gold)
-    return _r(m, 'hall_stage', (0, D, 0), cast=False, shadow_alpha=0.22, margin=2)
+        r0, r1 = cx - 3, cx + 3
+        m.quad((r0, yb, zb + 2), (r1, yb, zb + 2), (r1, ya, za + 2), (r0, ya, za + 2), goldf)
+        m.quad((r0, yb, zb), (r1, yb, zb), (r1, yb, zb + 2), (r0, yb, zb + 2), goldf)
+        m.quad((r0, yb, zb), (r0, ya, za), (r0, ya, za + 2), (r0, yb, zb + 2), goldf)
+        m.quad((r1, ya, za), (r1, yb, zb), (r1, yb, zb + 2), (r1, ya, za + 2), goldf)
+        # newel posts: at the foot and at the top, gold finials
+        m.box(cx - 6, D - 11, 0, cx + 6, D, zb + 7, marble, top=goldf)
+        m.ellipsoid((cx, D - 5.5, zb + 10.5), (3.4, 3, 3.4), goldf)
+        m.box(cx - 5.5, top_y - 10, STAGE_H, cx + 5.5, top_y + 1, STAGE_H + 16, marble, top=goldf)
+        m.ellipsoid((cx, top_y - 4.5, STAGE_H + 19.5), (3.2, 2.8, 3.2), goldf)
+    return _r(m, 'hall_stage', (0, D, 0), cast=False, shadow_alpha=0.2, margin=2)
 
 
 def hall_gate(open_=False):
