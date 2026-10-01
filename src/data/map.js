@@ -26,12 +26,15 @@ export const MAP_H = 128;
 // Elite Hall interior (tiles, inclusive). entry = where you appear inside,
 // exit = the doormat that takes you back out to `out` (in front of the doors).
 export const HALL = {
-  x0: 76, y0: 2, x1: 92, y1: 24,
+  x0: 76, y0: 1, x1: 92, y1: 24,
   entry: { x: 84, y: 23, facing: 'up' },
   exit: { x: 84, y: 24 },
   out: { x: 22, y: 13, facing: 'down' },
   gate: { x: 84, y: 4 },                 // the Hall of Fame gate behind the dais
-  spotRow: 11,                           // Cooker notices you once you pass this row
+  // The raised dais and its grand staircase (props3d hall_stage). Anything
+  // standing on it is lifted by its height (model units; x 1.48 on screen).
+  // The dais is entered only by the stairs; reaching it brings Cooker out.
+  stage: { x0: 79, x1: 89, daisY0: 4, daisY1: 7, stairs: { x0: 83, x1: 85, y0: 8, y1: 10 }, rails: [82, 86], height: 16 },
   // The walk up the carpet (see OverworldScene.hallStep): the aisle braziers
   // are cold until you come; pair n catches fire when you reach igniteRows[n].
   // Pair 3 is the two on the dais, which flare when Cooker shows himself.
@@ -60,10 +63,10 @@ export const GROUND = [
   ['grass', 0, 0, OUTDOOR_W - 1, MAP_H - 1],
   ['void', OUTDOOR_W, 0, MAP_W - 1, MAP_H - 1],
   // ---- Elite Hall interior ----
-  ['hall_top', 76, 2, 92, 2], ['hall_wall', 77, 3, 91, 4],
-  ['hall_side_l', 76, 3, 76, 23], ['hall_side_r', 92, 3, 92, 23],
+  ['hall_top', 76, 1, 92, 1], ['hall_wall', 77, 2, 91, 4],
+  ['hall_side_l', 76, 2, 76, 23], ['hall_side_r', 92, 2, 92, 23],
   ['hall_floor', 77, 5, 91, 23],
-  ['dais', 79, 5, 89, 6], ['dais_edge', 79, 7, 89, 7],
+  ['dais', 79, 5, 89, 7],
   ['carpet_l', 83, 8, 83, 23], ['carpet_m', 84, 8, 84, 23], ['carpet_r', 85, 8, 85, 23],
   ['hall_bottom', 76, 24, 92, 24], ['hall_mat', 84, 24, 84, 24],
 
@@ -228,7 +231,9 @@ export const PROPS = [
   { type: 'brazier', x: 82, y: 20, aisle: 0 }, { type: 'brazier', x: 86, y: 20, aisle: 0 },
   { type: 'brazier', x: 82, y: 16, aisle: 1 }, { type: 'brazier', x: 86, y: 16, aisle: 1 },
   { type: 'brazier', x: 82, y: 12, aisle: 2 }, { type: 'brazier', x: 86, y: 12, aisle: 2 },
-  { type: 'floor_emblem', x: 81, y: 8, deco: true },           // inlaid in the floor - walkable
+  { type: 'floor_emblem', x: 81, y: 13, deco: true },          // inlaid in the floor - walkable
+  { type: 'hall_stage', x: 79, y: 5, deco: true },             // the raised dais + grand staircase (walkable; see HALL.stage)
+  { type: 'hall_gate', x: 83, y: 3 },                          // the Hall of Fame gate (opens for Cooker)
   { type: 'banner', x: 81, y: 4 }, { type: 'banner', x: 87, y: 4 },
   { type: 'banner', x: 15, y: 11 }, { type: 'banner', x: 29, y: 11 },
   { type: 'lamp', x: 15, y: 15 }, { type: 'lamp', x: 29, y: 15 },
@@ -282,7 +287,7 @@ export const TRAINER_SPOTS = {
   t3: { x: 38, y: 83, facing: 'left' },
   t4: { x: 22, y: 62, facing: 'down', moved: { x: 21, y: 61 } },
   // Cooker waits on the dais inside the Elite Hall; once beaten, steps aside from the gate
-  cooker: { x: 84, y: 6, facing: 'down', moved: { x: 86, y: 6 } },
+  cooker: { x: 84, y: 5, facing: 'down', moved: { x: 86, y: 5 } },
 };
 
 // Footprint in tiles (w, h) and where the door is (relative, bottom row).
@@ -318,6 +323,8 @@ export const PROP_FOOTPRINTS = {
   pillar: { w: 1, h: 1 },
   brazier: { w: 1, h: 1 },
   floor_emblem: { w: 7, h: 3 },
+  hall_stage: { w: 11, h: 6 },
+  hall_gate: { w: 3, h: 2 },
 };
 
 // Border of trees around the whole map.

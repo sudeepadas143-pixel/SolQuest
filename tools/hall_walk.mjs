@@ -50,7 +50,7 @@ await shot('01_doors_slam');
 await clear();
 await shot('02_dark_hall');
 const seen = [];
-for (let i = 0; i < 16; i++) {
+for (let i = 0; i < 26; i++) {
   const st = await state();
   if (st.met) break;
   if (st.locked) { await sleep(700); await shot(`03_voice_y${st.y}`); await clear(); continue; }
@@ -58,8 +58,13 @@ for (let i = 0; i < 16; i++) {
   const s2 = await state();
   seen.push(`${s2.y}:${s2.stage}/${s2.light}${s2.locked ? 'L' : ''}`);
   if ([22, 18, 14].includes(s2.y)) { await sleep(700); await shot(`04_ignite_y${s2.y}`); }
+  if ([10, 9, 8].includes(s2.y)) await shot(`04b_stairs_y${s2.y}`);
 }
 console.log('walk', seen.join(' '));
+// the gate opens and Cooker walks out
+await sleep(1900); await shot('05a_gate');
+await sleep(1300); await shot('05b_gate_open');
+await sleep(1200); await shot('05c_cooker_out');
 await sleep(1500);
 await shot('05_reveal');
 await p.waitForFunction(() => window.__game.scene.getScene('OverworldUI').box.container.visible, null, { timeout: 15000 });
@@ -85,13 +90,13 @@ console.log('after NOT YET', JSON.stringify(await state()));
 // ---- 2: ready (Sharkrex Lv 24): straight to battle, no voice lines this time ----
 await setup('sharkrex', 24);
 await sleep(1200); await clear();
-for (let i = 0; i < 16 && !(await state()).met; i++) { if ((await state()).locked) await clear(); else await step(); }
+for (let i = 0; i < 26 && !(await state()).met; i++) { if ((await state()).locked) await clear(); else await step(); }
 for (let i = 0; i < 30 && !(await state()).battle; i++) { await p.keyboard.press('Enter'); await sleep(400); }
 console.log('battle started:', (await state()).battle);
 await sleep(2500);
 await shot('09_battle');
 // ---- 3: under-levelled, BATTLE anyway, lose -> Cooker coaches you ----
-await ow(() => { const g = window.__game; g.scene.stop('Battle'); const o = g.scene.getScene('Overworld'); o.scene.resume(); o.scene.wake('OverworldUI'); o.scene.wake('Atmosphere'); o.locked = false; o.pendingBattle = null; o.cookerMet = false; o.placeTrainer('cooker', { x: 84, y: 6 }); o.hallReset(); o.cameras.main.startFollow(o.player, true, 1, 1, 0, 12); });
+await ow(() => { const g = window.__game; g.scene.stop('Battle'); const o = g.scene.getScene('Overworld'); o.scene.resume(); o.scene.wake('OverworldUI'); o.scene.wake('Atmosphere'); o.locked = false; o.pendingBattle = null; o.cookerMet = false; o.placeTrainer('cooker', { x: 84, y: 5 }); o.hallReset(); o.cameras.main.startFollow(o.player, true, 1, 1, 0, 12); });
 await sleep(500);
 await ow(() => { const o = window.__game.scene.getScene('Overworld'); o.pos = { x: 84, y: 12 }; o.syncPlayer(); const c = o.save.party[0]; c.species = 'sharkpup'; c.level = 12; c.xp = 12 ** 3; c.hp = 30; c.moves = [{ id: 'bump', pp: 30 }]; });
 await p.keyboard.down('ArrowUp'); await sleep(150); await p.keyboard.up('ArrowUp');

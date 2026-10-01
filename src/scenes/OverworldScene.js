@@ -23,7 +23,7 @@ import { TRACKS } from '../data/music.js';
 import { trainerArt } from '../ui/trainerArt.js';
 import { looseRng } from '../systems/rng.js';
 import { heldDirection, isHeld, pushFocusToken } from '../systems/controls.js';
-import { wait } from '../ui/helpers.js';
+import { wait, tween } from '../ui/helpers.js';
 import { used } from '../systems/hints.js';
 
 const DELTA = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
@@ -37,6 +37,9 @@ function themeFor(kind, design) {
   return kind === 'encounter' ? 'eliteEncounter' : 'eliteBattle';
 }
 const ROWS = ['down', 'left', 'right', 'up'];
+// screen lift per model unit of height (tools/iso3d.py: PITCH x RES texels,
+// ART_SCALE texels per world unit): how far up the Hall's dais draws you
+const LIFT = (0.74 * 4) / ART_SCALE;
 const WARM = 0xffd38a;
 
 export class OverworldScene extends Phaser.Scene {
@@ -70,9 +73,11 @@ export class OverworldScene extends Phaser.Scene {
     this.aisle = [];            // the Hall's braziers, lit pair by pair on the final walk
     for (const p of this.map.props) {
       const bx = p.x * TILE_W;
-      const by = (p.y + p.h) * TILE_H;
+      const ground = (p.y + p.h) * TILE_H;
+      const by = ground - this.lift(p.x, p.y + p.h - 1);     // up on the dais, drawn higher (sorted by the ground)
       const m = tilesMeta.props[p.type];
-      const img = this.add.image(bx, by, p.type).setOrigin(m.ax / m.w, m.ay / m.h).setDepth(p.deco ? -5 : by).setScale(1 / ART_SCALE);
+      const img = this.add.image(bx, by, p.type).setOrigin(m.ax / m.w, m.ay / m.h).setDepth(p.deco ? -5 : ground).setScale(1 / ART_SCALE);
+      if (p.type === 'hall_gate') this.gateImg = img;
       let pair = null;
       if (p.aisle != null) {
         // the bowl stays the cold model; fire is an animated sprite on top (see ignite)
@@ -266,11 +271,20 @@ export class OverworldScene extends Phaser.Scene {
 
   tileFoot(x, y) { return { x: x * TILE_W + TILE_W / 2, y: y * TILE_H + TILE_H - 2 }; }
 
+  /** Screen lift of tile (x, y): the Hall's dais and stairs raise whoever stands there. */
+  lift(x, y) { return (this.map.elev[y]?.[x] ?? 0) * LIFT; }
+
+  /** Where a character standing on (x, y) is drawn: feet (lifted) + depth (ground). */
+  standAt(x, y) {
+    const f = this.tileFoot(x, y);
+    return { x: f.x, y: f.y - this.lift(x, y), depth: f.y };
+  }
+
   syncPlayer() {
-    const f = this.tileFoot(this.pos.x, this.pos.y);
-    this.player.setPosition(f.x, f.y);
-    this.player.setDepth(this.player.y + 0.5);
-    this.shadow.setPosition(f.x, f.y - 1).setDepth(this.player.depth - 0.2);
+    const s = this.standAt(this.pos.x, this.pos.y);
+    this.player.setPosition(s.x, s.y);
+    this.player.setDepth(s.depth + 0.5);
+    this.shadow.setPosition(s.x, s.y - 1).setDepth(this.player.depth - 0.2);
   }
 
   placeTrainer(id, spot) {
@@ -281,10 +295,10 @@ export class OverworldScene extends Phaser.Scene {
     this.npcSprites[`${id}_shadow`]?.destroy();
     for (const [k, v] of this.npcAt) if (v === id) this.npcAt.delete(k);
     const art = trainerArt(design).overworld;
-    const f = this.tileFoot(at.x, at.y);
-    this.npcSprites[`${id}_shadow`] = this.add.ellipse(f.x, f.y - 1, 22, 8, 0x0b1020, 0.28).setDepth(f.y - 0.5);
+    const f = this.standAt(at.x, at.y);
+    this.npcSprites[`${id}_shadow`] = this.add.ellipse(f.x, f.y - 1, 22, 8, 0x0b1020, 0.28).setDepth(f.depth - 0.5);
     const s = this.add.sprite(f.x, f.y, art.key, art.frame).setOrigin(0.5, 1).setScale(CHAR_SCALE);
-    s.setDepth(s.y);
+    s.setDepth(f.depth);
     s.anims.play({ key: art.anim, startFrame: looseRng.int(0, 4) });
     this.npcSprites[id] = s;
     this.npcAt.set(this.map.key(at.x, at.y), id);
@@ -295,6 +309,9 @@ export class OverworldScene extends Phaser.Scene {
     const k = this.map.key(x, y);
     return !this.map.blocked[y][x] && !this.npcAt.has(k) && !this.itemAt.has(k);
   }
+
+  /** A step from (x0, y0) to the neighbour (x1, y1): free, and no ledge in between. */
+  canStep(x0, y0, x1, y1) { return this.walkable(x1, y1) && this.map.canStep(x0, y0, x1, y1); }
 
   face(dir) {
     this.facing = dir;
@@ -379,7 +396,7 @@ export class OverworldScene extends Phaser.Scene {
     const [dx, dy] = DELTA[dir];
     const nx = this.pos.x + dx;
     const ny = this.pos.y + dy;
-    if (!this.walkable(nx, ny)) {
+    if (!this.canStep(this.pos.x, this.pos.y, nx, ny)) {
       this.face(dir);
       if (this.time.now > this.bumpCooldown) {
         this.bumpCooldown = this.time.now + 350;
@@ -391,7 +408,10 @@ export class OverworldScene extends Phaser.Scene {
     // the Hall before Cooker falls: no running, a slower, heavier step
     const tense = this.indoors && !this.save.defeated.cooker;
     const running = !tense && (isHeld('run') || !!this.path?.run);
-    const WALK = tense ? WALK_MS * 1.45 : WALK_MS;
+    // stairs: a measured climb (or descent), one soft footfall per step
+    const stairs = this.map.elev[ny][nx] !== this.map.elev[this.pos.y][this.pos.x];
+    const WALK = WALK_MS * (tense ? 1.45 : 1) * (stairs ? 1.35 : 1);
+    if (stairs) sfx('footstep');
     // Frames are locked to the tile step, like the handheld games: each tile is
     // one step (alternating feet); running shows contact then airborne frames.
     this.stepParity = !this.stepParity;
@@ -413,17 +433,19 @@ export class OverworldScene extends Phaser.Scene {
       sfx('grass', { run: running });
       this.time.delayedCall(dur * 0.5, () => this.rustle(nx, ny));
     }
-    const f = this.tileFoot(nx, ny);
+    const from = this.standAt(this.pos.x, this.pos.y);
+    const to = this.standAt(nx, ny);
+    const prog = { k: 0 };
     this.tweens.add({
-      targets: this.player,
-      x: f.x,
-      y: f.y,
+      targets: prog,
+      k: 1,
       duration: dur,
       onUpdate: () => {
-        const k = (this.time.now - t0) / dur;
+        const k = prog.k;
         const second = k >= (running ? 0.5 : 0.55);
         this.player.setFrame(row + seq[second ? 1 : 0]);
-        this.player.setDepth(this.player.y + 0.5);
+        this.player.setPosition(from.x + (to.x - from.x) * k, from.y + (to.y - from.y) * k);
+        this.player.setDepth(from.depth + (to.depth - from.depth) * k + 0.5);
         // airborne run frames: the shadow tightens under the feet
         this.shadow.setScale(running && second ? 0.82 : 1);
         this.shadow.setPosition(this.player.x, this.player.y - 1).setDepth(this.player.depth - 0.2);
@@ -554,7 +576,7 @@ export class OverworldScene extends Phaser.Scene {
         const nx = cx + dx;
         const ny = cy + dy;
         const n = ny * W + nx;
-        if (prev.has(n) || !this.walkable(nx, ny)) continue;
+        if (prev.has(n) || !this.canStep(cx, cy, nx, ny)) continue;
         prev.set(n, cur);
         queue.push(n);
       }
@@ -576,7 +598,7 @@ export class OverworldScene extends Phaser.Scene {
       return;
     }
     const dir = next.x < this.pos.x ? 'left' : next.x > this.pos.x ? 'right' : next.y < this.pos.y ? 'up' : 'down';
-    if (!this.walkable(next.x, next.y)) { this.clearPath(); this.face(dir); return; }
+    if (!this.canStep(this.pos.x, this.pos.y, next.x, next.y)) { this.clearPath(); this.face(dir); return; }
     this.facing = dir;
     this.tryStep(dir);
   }
@@ -775,7 +797,8 @@ export class OverworldScene extends Phaser.Scene {
     const cam = this.cameras.main;
     this.indoors = this.pos.x >= OUTDOOR_W;
     if (this.indoors) {
-      cam.setBounds(HALL.x0 * TILE_W, HALL.y0 * TILE_H, (HALL.x1 - HALL.x0 + 1) * TILE_W, (HALL.y1 - HALL.y0 + 2) * TILE_H);
+      // headroom above the back wall, so the gate can be framed clear of the HUD
+      cam.setBounds(HALL.x0 * TILE_W, (HALL.y0 - 3) * TILE_H, (HALL.x1 - HALL.x0 + 1) * TILE_W, (HALL.y1 - HALL.y0 + 5) * TILE_H);
       cam.setBackgroundColor('#08080f');
     } else {
       cam.setBounds(0, 0, OUTDOOR_W * TILE_W, this.map.h * TILE_H);
@@ -786,47 +809,72 @@ export class OverworldScene extends Phaser.Scene {
     if (this.hallDust) this.hallDust.emitting = this.indoors;
   }
 
-  /** Cooker spots you on the carpet, walks down to meet you, and talks. */
-  cookerApproach() {
+  /** Up the stairs and onto the dais: the gate behind it opens and Cooker
+   *  walks out of the light to meet you. */
+  cookerArrives() {
     this.cookerMet = true;
     this.runLocked(async () => {
       const spr = this.npcSprites.cooker;
       const shadow = this.npcSprites.cooker_shadow;
-      // every flame in the Hall flares at once, and there he is
-      music(null);
       const cam = this.cameras.main;
+      const gate = this.gateImg;
+      const panTo = (x, y, ms) => new Promise((res) => cam.pan(x, y, ms, 'Sine.easeInOut', false, (_c, t) => { if (t === 1) res(); }));
+      music(null);
+      this.ui.hud?.(false);
       cam.stopFollow();
-      await new Promise((res) => cam.pan(spr.x, spr.y + 40, 900, 'Sine.easeInOut', false, (_c, t) => { if (t === 1) res(); }));
-      await wait(this, 400);
+      // the camera rises to the gate and leans in
+      const door = this.standAt(HALL.gate.x, HALL.gate.y);
+      this.tweens.add({ targets: cam, zoom: WORLD_ZOOM * 1.12, duration: 1500, ease: 'Sine.easeInOut' });
+      await panTo(door.x, door.y - 10, 1500);
+      await wait(this, 350);
+      // light leaks round the doors; the Hall shudders; they open
+      this.gateLeak?.destroy();
+      const leak = this.gateLeak = this.add.image(door.x, door.y - 34, 'glow').setBlendMode(Phaser.BlendModes.ADD).setTint(0xffd890)
+        .setScale(0.5, 1.2).setAlpha(0).setDepth(gate.depth + 1);
+      sfx('hallDoors');
+      cam.shake(800, 0.0035);
+      await tween(this, { targets: leak, alpha: 0.75, duration: 800, ease: 'Sine.easeIn' });
+      const m = tilesMeta.props.hall_gate_open;
+      gate.setTexture('hall_gate_open').setOrigin(m.ax / m.w, m.ay / m.h);
+      this.setGateLight(true);
+      cam.flash(260, 255, 226, 170);
+      this.dustBurst(30);
+      this.tweens.add({ targets: leak, scaleX: 1.1, scaleY: 1.6, alpha: 0.35, duration: 900, ease: 'Cubic.easeOut' });
+      await wait(this, 500);
+      // Cooker, a silhouette against the light, steps out and down to the dais
+      spr.setPosition(door.x, door.y).setDepth(door.depth + 0.4).setAlpha(0).setTint(0x140f20);
+      shadow?.setPosition(door.x, door.y - 1).setAlpha(0);
+      await tween(this, { targets: spr, alpha: 1, duration: 450 });
+      const spot = TRAINER_SPOTS.cooker;
+      const to = this.standAt(spot.x, spot.y);
+      sfx('footstep');
+      const shade = { k: 0 };
+      await tween(this, {
+        targets: shade, k: 1, duration: 700, ease: 'Sine.easeInOut',
+        onUpdate: () => {
+          spr.setPosition(door.x + (to.x - door.x) * shade.k, door.y + (to.y - door.y) * shade.k).setDepth(door.depth + (to.depth - door.depth) * shade.k + 0.4);
+          const c = Phaser.Display.Color.Interpolate.ColorWithColor({ r: 20, g: 15, b: 32 }, { r: 255, g: 255, b: 255 }, 100, shade.k * 100);
+          spr.setTint(Phaser.Display.Color.GetColor(c.r, c.g, c.b));
+          shadow?.setPosition(spr.x, spr.y - 1).setDepth(spr.depth - 0.5).setAlpha(0.28 * shade.k);
+        },
+      });
+      spr.clearTint().setDepth(to.depth);
+      this.npcAt.set(this.map.key(spot.x, spot.y), 'cooker');
+      // every flame in the Hall answers him
       this.ignite(3, { flare: true });
-      spr.clearTint();
-      await wait(this, 900);
+      await wait(this, 700);
       sfx('spotted');
       music('cookerEncounter');
       await this.exclaim(spr);
-      const col = TRAINER_SPOTS.cooker.x;
-      let cy = TRAINER_SPOTS.cooker.y;
-      const stopY = Math.max(cy, this.pos.y - 2);      // face-off distance
-      this.npcAt.delete(this.map.key(col, cy));
-      while (cy < stopY && !(col === this.pos.x && cy + 1 === this.pos.y)) {
-        cy += 1;
-        const f = this.tileFoot(col, cy);
-        sfx('footstep');
-        await new Promise((res) => this.tweens.add({
-          targets: [spr], x: f.x, y: f.y, duration: 260, ease: 'Sine.easeInOut',
-          onUpdate: () => { spr.setDepth(spr.y); shadow?.setPosition(spr.x, spr.y - 1).setDepth(spr.y - 0.5); },
-          onComplete: res,
-        }));
-      }
-      this.npcAt.set(this.map.key(col, cy), 'cooker');
-      // back to the player
-      await new Promise((res) => cam.pan(this.player.x, this.player.y - TILE_H / 2, 500, 'Sine.easeInOut', false, (_c, t) => { if (t === 1) res(); }));
+      // back to the two of you
+      const me = this.standAt(this.pos.x, this.pos.y);
+      await panTo((me.x + to.x) / 2, (me.y + to.y) / 2 - 20, 700);
       cam.startFollow(this.player, true, 1, 1, 0, TILE_H / 2);
-      // turn to face Cooker
-      const dir = col < this.pos.x ? 'left' : col > this.pos.x ? 'right' : 'up';
+      const dir = spot.x < this.pos.x ? 'left' : spot.x > this.pos.x ? 'right' : 'up';
       this.face(dir);
       await wait(this, 250);
       await this.talkTrainer('cooker', { noticed: true });
+      this.ui.hud?.(true);
     });
   }
 
@@ -852,8 +900,33 @@ export class OverworldScene extends Phaser.Scene {
     this.hallStage = 0;
     this.hallLight = lit ? 1 : 0.18;
     this.aisle.forEach((pair) => pair?.forEach((b) => this.setFlame(b, lit)));
+    // before he falls, Cooker waits behind the closed gate; after, it stands open
     const ck = this.npcSprites.cooker;
-    if (ck) { if (lit) ck.clearTint(); else ck.setTint(0x2a2238); }
+    const sh = this.npcSprites.cooker_shadow;
+    if (ck) {
+      ck.clearTint().setAlpha(lit ? 1 : 0);
+      sh?.setAlpha(lit ? 0.28 : 0);
+      if (!lit) for (const [k, v] of this.npcAt) if (v === 'cooker') this.npcAt.delete(k);
+    }
+    this.gateLeak?.destroy();
+    this.gateLeak = null;
+    this.setGateLight(lit);
+    if (this.gateImg) {
+      const key = lit ? 'hall_gate_open' : 'hall_gate';
+      const m = tilesMeta.props[key];
+      this.gateImg.setTexture(key).setOrigin(m.ax / m.w, m.ay / m.h);
+    }
+  }
+
+  /** The open gate's light spilling onto the dais (a light pool for the atmosphere pass). */
+  setGateLight(on) {
+    if (!this.gateLight) {
+      const door = this.standAt(HALL.gate.x, HALL.gate.y);
+      this.gateLight = { x: door.x, y: door.y - 30, r: 46, color: 0xffd890 };
+    }
+    const i = this.lights.indexOf(this.gateLight);
+    if (on && i < 0) this.lights.push(this.gateLight);
+    if (!on && i >= 0) this.lights.splice(i, 1);
   }
 
   /** Light (or put out) one brazier: a flickering flame, embers and its light pool. */
@@ -917,7 +990,7 @@ export class OverworldScene extends Phaser.Scene {
         if (n === 1) music('hallWalk2');             // halfway: the heart speeds up
       }
     });
-    if (y <= HALL.spotRow) { this.cookerApproach(); return true; }
+    if (y <= HALL.stage.daisY1) { this.cookerArrives(); return true; }
     return false;
   }
 
@@ -945,6 +1018,7 @@ export class OverworldScene extends Phaser.Scene {
   /** Turned back by Cooker: out through the doors, and he returns to his throne. */
   async leaveHall() {
     this.cookerMet = false;
+    this.cameras.main.setZoom(WORLD_ZOOM);
     this.placeTrainer('cooker', TRAINER_SPOTS.cooker);
     this.hallReset();
     await this.warp(HALL.out);
@@ -1015,6 +1089,7 @@ export class OverworldScene extends Phaser.Scene {
     this.scene.wake('OverworldUI');
     this.scene.wake('Atmosphere');
     this.ui.clearWipe();
+    this.ui.hud?.(true);
     this.cameras.main.setZoom(WORLD_ZOOM);
     this.cameras.main.fadeIn(350);
     if (res.result !== 'lose') this.updateMusic(true);   // after a loss the lament plays out first

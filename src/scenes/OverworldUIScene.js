@@ -131,6 +131,13 @@ export class OverworldUIScene extends Phaser.Scene {
     this.chrome(true);
   }
 
+  /** The HUD chips fade away for cutscenes (the gate opening in the Hall). */
+  hud(on) {
+    const targets = [this.locChip, this.timeChip, this.runChip, this.badgeChip, this.scoreText, ...this.badges, this.legend, this.menuBtn].filter(Boolean);
+    this.tweens.killTweensOf(targets);
+    this.tweens.add({ targets, alpha: on ? 1 : 0, duration: on ? 400 : 300 });
+  }
+
   /** The bottom-corner bits (legend, MENU button) step aside for the dialogue box. */
   chrome(on) {
     const targets = [this.legend, this.menuBtn].filter(Boolean);

@@ -949,6 +949,161 @@ def floor_emblem():
     return _r(m, 'floor_emblem', (0, 48, 0), cast=False, outline=False, shadow_alpha=0)
 
 
+# --------------------------------------------------- the Hall's grand stage ----
+# The dais is raised STAGE_H units (a third of a person); a staircase of
+# STEPS carpeted steps climbs to it over three tile rows. The game lifts
+# anything standing on it by the same height (src/data/map.js HALL.stage).
+STAGE_H = 16
+STEPS = 8
+GOLD_HEX = '#ecbc48'
+
+
+def carpet_shader(lane0, lane1, riser=False):
+    """The Hall's red carpet, gold-edged at the lane borders; on risers it is
+    darker with a gold stair rod at the top."""
+    red = c('#a8223a')
+    gold = c(GOLD_HEX)
+
+    def sh(P, uv, n):
+        x = P[:, 0]
+        out = np.tile(red * (0.82 if riser else 1.0), (len(P), 1))
+        weave = (np.floor(P[:, 1] * 2 + P[:, 2] * 2) % 2 == 0)
+        out = np.where(weave[:, None], out * 0.95, out)
+        edge = (x < lane0 + 2.2) | (x > lane1 - 2.2)
+        inner = ((x > lane0 + 3.2) & (x < lane0 + 3.9)) | ((x < lane1 - 3.2) & (x > lane1 - 3.9))
+        out = np.where(edge[:, None], gold * 0.88, out)
+        out = np.where(inner[:, None], gold, out)
+        if riser:
+            rod = uv[:, 1] > (uv[:, 1].max() - 0.7) if len(uv) else np.zeros(0, bool)
+            out = np.where(rod[:, None], gold * 1.05, out)
+        return np.clip(out, 0, 255), None
+    return sh
+
+
+def dais_top_shader(x0, x1, y0, y1, lane0, lane1):
+    """Pale lilac marble with a gold inlay border; the carpet runs up the middle to the gate."""
+    marble = c('#ded6ec')
+    gold = c(GOLD_HEX)
+    carpet = carpet_shader(lane0, lane1)
+
+    def sh(P, uv, n):
+        x, y = P[:, 0], P[:, 1]
+        out = np.tile(marble, (len(P), 1))
+        diag = ((x + y) % 16) < 0.9
+        out = np.where(diag[:, None], out * 0.94, out)
+        j = (I.hash3(np.floor(x / 4), np.floor(y / 4), 0, 61) - 0.5) * 8
+        out = out + j[:, None]
+        border = (np.abs(x - x0 - 4) < 0.7) | (np.abs(x - x1 + 4) < 0.7) | (np.abs(y - y1 + 4) < 0.7)
+        out = np.where(border[:, None], gold, out)
+        lane = (x >= lane0) & (x <= lane1)
+        if lane.any():
+            cp, _ = carpet(P[lane], uv[lane], n)
+            out[lane] = cp
+        return np.clip(out, 0, 255), None
+    return sh
+
+
+def riser_shader():
+    """The dais's front face: violet marble panels, a gold lip, a dark plinth line."""
+    stone = c('#8a74b4')
+    gold = c(GOLD_HEX)
+
+    def sh(P, uv, n):
+        z = P[:, 2]
+        out = np.tile(stone, (len(P), 1))
+        panel = (np.floor(P[:, 0] / 16) % 2 == 0)
+        out = np.where(panel[:, None], out * 0.93, out)
+        out = np.where((z > STAGE_H - 2.2)[:, None], gold, out)
+        out = np.where(((z > STAGE_H - 3.0) & (z <= STAGE_H - 2.2))[:, None], gold * 0.7, out)
+        out = np.where((z < 1.4)[:, None], stone * 0.62, out)
+        return out, None
+    return sh
+
+
+def hall_stage():
+    """The raised dais and its grand staircase (footprint 11 x 6 tiles: the
+    dais is the back three rows, the stairs the front three, centred on the
+    carpet). Flat-topped and walkable - drawn under the characters."""
+    m = Model()
+    W, D = 11 * T, 6 * T
+    top_y = 3 * T                         # dais front edge / top of the stairs
+    lane0, lane1 = 4 * T, 7 * T           # the carpet lane (3 tiles)
+    marble = I.flat('#efeaf6', jitter=2)
+    gold = I.flat(GOLD_HEX)
+    # the dais
+    m.box(0, 0, 0, W, top_y, STAGE_H, I.flat('#8a74b4'), top=dais_top_shader(0, W, 0, top_y, lane0, lane1),
+          south=riser_shader())
+    # the stairs: one block per step, its top the tread and its front the riser
+    run = (D - top_y) / STEPS
+    rise = STAGE_H / STEPS
+    for k in range(STEPS):
+        y0 = top_y + k * run
+        zt = STAGE_H - (k + 1) * rise
+        m.box(lane0, y0, 0, lane1, y0 + run, max(0.01, zt), carpet_shader(lane0, lane1, riser=True),
+              top=carpet_shader(lane0, lane1), south=carpet_shader(lane0, lane1, riser=True))
+    # balustrades: low marble walls following the slope, gold rail on top
+    def zt_at(y):
+        return 9 + STAGE_H * (D - y) / (D - top_y)
+    for xa, xb in ((lane0 - 7, lane0), (lane1, lane1 + 7)):
+        ya, yb = top_y, D - 2
+        za, zb = zt_at(ya), zt_at(yb)
+        for xx, sgn in ((xa, -1), (xb, 1)):          # side faces
+            m.quad((xx, yb, 0), (xx, ya, 0), (xx, ya, za), (xx, yb, zb), marble)
+        m.quad((xa, yb, 0), (xb, yb, 0), (xb, yb, zb), (xa, yb, zb), marble)      # front end
+        m.quad((xa, yb, zb), (xb, yb, zb), (xb, ya, za), (xa, ya, za), marble)    # sloped top
+        r0, r1 = (xa + xb) / 2 - 2.4, (xa + xb) / 2 + 2.4                         # the gold rail
+        m.quad((r0, yb, zb + 1.6), (r1, yb, zb + 1.6), (r1, ya, za + 1.6), (r0, ya, za + 1.6), gold)
+        m.quad((r0, yb, zb), (r1, yb, zb), (r1, yb, zb + 1.6), (r0, yb, zb + 1.6), gold)
+        m.quad((r0, yb, zb), (r0, ya, za), (r0, ya, za + 1.6), (r0, yb, zb + 1.6), gold)
+        m.quad((r1, ya, za), (r1, yb, zb), (r1, yb, zb + 1.6), (r1, ya, za + 1.6), gold)
+        cx = (xa + xb) / 2
+        # newel posts with gold finials: at the foot, and up on the dais
+        m.box(cx - 4.5, D - 9, 0, cx + 4.5, D, zb + 5, marble, top=gold)
+        m.ellipsoid((cx, D - 4.5, zb + 8), (2.8, 2.4, 2.8), gold)
+        m.box(cx - 4, top_y - 7, STAGE_H, cx + 4, top_y + 1, STAGE_H + 15, marble, top=gold)
+        m.ellipsoid((cx, top_y - 3, STAGE_H + 18), (2.6, 2.2, 2.6), gold)
+    return _r(m, 'hall_stage', (0, D, 0), cast=False, shadow_alpha=0.22, margin=2)
+
+
+def hall_gate(open_=False):
+    """The Hall of Fame gate in the back wall, standing on the dais (footprint
+    3 x 2 tiles: wall rows). Closed: violet leaves with gold studs and the Sol
+    mark. Open: the doorway blazes with light."""
+    m = Model()
+    W = 3 * T
+    z0 = STAGE_H
+    gold = I.flat(GOLD_HEX)
+    gold_dk = I.flat('#b8902e')
+    yb = 2 * T                                 # front of the gate (wall face)
+    # pillars
+    for xa in (1, W - 8):
+        m.box(xa, yb - 7, z0, xa + 7, yb, z0 + 40, gold, south=gold_dk)
+        m.box(xa - 1, yb - 8, z0 + 40, xa + 8, yb + 1, z0 + 43, gold)
+    # lintel with the Sol mark
+    m.box(0, yb - 8, z0 + 43, W, yb + 1, z0 + 50, gold)
+    m.ellipsoid((W / 2, yb - 1, z0 + 47), (5.5, 1.4, 4.5), I.flat('#9945ff'))
+    m.ellipsoid((W / 2 + 2.2, yb - 0.6, z0 + 47), (2.8, 1, 2.6), I.flat('#14f195'))
+    if open_:
+        m.box(8, yb - 3, z0, W - 8, yb - 1.5, z0 + 40, I.glow('#fff1c8'))
+        m.box(10, yb - 2, z0, W - 10, yb - 0.5, z0 + 37, I.glow('#ffd77a'))
+    else:
+        leaf = c('#4a2c86')
+        studs = c(GOLD_HEX)
+
+        def leaves(P, uv, n):
+            x, z = P[:, 0], P[:, 2] - z0
+            out = np.tile(leaf, (len(P), 1))
+            seam = np.abs(x - W / 2) < 0.6
+            stud = ((np.abs((x - 8) % 6 - 3) < 0.9) & (np.abs(z % 8 - 4) < 0.9))
+            band = (np.abs(z - 18) < 1.0) | (np.abs(z - 34) < 1.0)
+            out = np.where(stud[:, None] | band[:, None], studs, out)
+            out = np.where(seam[:, None], leaf * 0.55, out)
+            return out, None
+        m.box(8, yb - 3, z0, W - 8, yb - 1, z0 + 40, I.flat('#3a2268'), south=leaves)
+    with I.camera(0):
+        return _r(m, 'hall_gate_open' if open_ else 'hall_gate', (0, 2 * T, 0), cast=False, shadow_alpha=0, margin=2)
+
+
 def build_all():
     """Render every prop; light points (lit windows, lamps) are recorded in LIGHTS."""
     builders = [
@@ -995,6 +1150,9 @@ def build_all():
         ('brazier', lambda: brazier()),
         ('brazier_cold', lambda: brazier(lit=False)),
         ('floor_emblem', lambda: floor_emblem()),
+        ('hall_stage', lambda: hall_stage()),
+        ('hall_gate', lambda: hall_gate()),
+        ('hall_gate_open', lambda: hall_gate(open_=True)),
     ] + [(f'tall_{l}{v}_{f}', (lambda v=v, l=l, f=f: tall_grass(v, l, f)))
          for v in range(GRASS_VARIANTS) for l in ('back', 'front') for f in range(len(GRASS_SWAY))] \
       + [(f'clump{v}', (lambda v=v: grass_clump(v))) for v in range(3)]
