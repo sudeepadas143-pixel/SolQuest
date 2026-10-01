@@ -443,6 +443,42 @@ same level for Cooker.
 - **Music**: each Elite has an encounter theme and a battle theme. Evolution has
   its own build-up and fanfare.
 
+### Refinement pass
+
+- **Professor Mia** replaces the faceless intro. `tools/make_mia.py` turns the
+  supplied art (`tools/src_art/professor_mia.png`) into a crisp pixel portrait:
+  a fixed palette, a 5.12 px sampling grid, the black background flood-filled
+  away and a 1-texel outline restored. The intro is five lines plus the name.
+- **Wallet is required.** No skip on the profile screen; a save from before
+  this rule asks for one when it loads; the profile editor won't save a blank.
+- **Mouse everywhere.** Every "continue" accepts a click (`waitContinue()` in
+  `ui/helpers.js`); menus tick on hover; Look/Starter cards highlight on hover.
+  In the overworld, click a tile to walk there (breadth-first path, long trips
+  run, a direction key takes over) or click a trainer, item, sign, door or
+  landmark to walk up to it and use it. A MENU button sits bottom-left on PC.
+  `tools/mouse_check.mjs` plays title to overworld with the mouse alone.
+- **Controls legend** (PC only): `systems/hints.js` counts uses per control;
+  learned rows leave, and the legend goes once all are known (or after ten
+  minutes of play). Remembered per browser, not per save.
+- **Movement.** The rig's front/back views now lean into the direction of
+  travel: toward the camera the torso foreshortens and the head drops, away
+  from it the back lengthens (`pitch_body()` resizes only the torso, so faces
+  never squash). About-turns flash the side frame; starting a run or reversing
+  mid-run kicks up dust; the shadow tightens on airborne frames; sand takes
+  footprints.
+- **The Elite Hall's grand staircase.** `props3d.hall_stage` (dais raised 16
+  units, eight carpeted steps, marble balustrades with gold rails) and
+  `hall_gate` (closed / open). The map carries a height per tile
+  (`HALL.stage`, `map.elev`); sprites are lifted by it while depth sorts on the
+  ground, and steps only join tiles of similar height, so the dais is reached
+  by the stairs alone. Cooker now waits behind the gate: reaching the dais
+  opens it and he walks out (`cookerArrives()`).
+- **Ambient life** (`scenes/ambient.js`): the windmill turns (eight sail
+  frames), chimneys smoke, the fountain plays, the pond ripples and a fish
+  jumps, butterflies, pecking birds that scatter, flocks overhead, falling
+  leaves and petals; fireflies (through the light pass) and lamp moths at
+  night; birdsong by day and crickets by night. View-culled and capped.
+
 ## 8. Engineering notes
 
 - **Phones.** The page blocks double-tap zoom, pinch zoom, the long-press

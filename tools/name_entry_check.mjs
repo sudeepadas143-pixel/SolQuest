@@ -29,8 +29,8 @@ const run = async (useA) => {
   await ctx.close();
 };
 async function okXY(p) {
-  // OK button: game coords (480, 405) -> page coords through the canvas scale
-  return p.evaluate(() => { const c = document.querySelector('canvas').getBoundingClientRect(); return [c.left + (480 / 960) * c.width, c.top + (405 / 640) * c.height]; });
+  // OK button: game coords (370, 350) -> page coords through the canvas scale
+  return p.evaluate(() => { const c = document.querySelector('canvas').getBoundingClientRect(); return [c.left + (370 / 960) * c.width, c.top + (350 / 640) * c.height]; });
 }
 await run(false);
 await run(true);

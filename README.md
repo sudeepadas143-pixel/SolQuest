@@ -63,16 +63,23 @@ node tools/name_entry_check.mjs out/   # phone emulation: name entry via OK butt
 | Back | Esc, X, Backspace | B (tap) |
 | Menu (Team, Bag, Profile, Sound, Save) | M | MENU |
 | Sound on/off | N | via MENU |
+| Walk somewhere / use something | click a tile, a trainer, sign, door or item | tap it |
+
+Everything can be played with the mouse alone: click to walk (long trips run),
+click things to walk up and use them, click to advance dialogue, and use the
+**MENU** button in the bottom-left corner. On PC a small key legend sits in the
+bottom-right corner; each control drops off it once you've used it a few times,
+and it's gone once you know them all (remembered per browser).
 
 Walk into a trainer to battle them. Walk up into a door to enter. Walk through the
-Elite Hall's doors and up the carpet to face Cooker. **The Solace** (the rest
+Elite Hall's doors, up the carpet and the grand staircase to face Cooker. **The Solace** (the rest
 stop) heals your team, saves the game, and sets your respawn point.
 
 ## Game flow
 
-Title → Professor Satoshi intro (black screen, white text, name entry) → choose look
+Title → Professor Mia's intro (five short lines and your name) → choose look
 (boy or girl; the portrait shrinks into your in-game sprite) → choose starter (no
-take-backs) → wallet profile → overworld.
+take-backs) → wallet (required) → overworld.
 
 The route runs south to north:
 - **Start town**, then **Trainer 1**, who blocks the only gap in the first hedge wall.
@@ -84,9 +91,11 @@ The route runs south to north:
   They slam shut behind you and the Hall is dark. You can't run on the carpet.
   Letterbox bars close in, a heartbeat theme plays, and the cold braziers along
   the aisle catch fire pair by pair as you pass. Halfway up, the music speeds up.
-  There's no narration: the dark and the flames carry it. At the top, the camera
-  pans up to the dais, every flame flares at once, and **Cooker** walks down to
-  face you. Winning opens the gold gate behind the dais to the **Hall of Fame**.
+  There's no narration: the dark and the flames carry it. A grand staircase
+  climbs to the raised dais. At the top the HUD falls away, the camera rises to
+  the gold gate in the back wall, light leaks round its doors and they open:
+  **Cooker** steps out of the light as every flame flares. Winning leaves that
+  gate open onto the **Hall of Fame**.
 
 The four route Elites are TJR, Ansem, Orangie and Cented, in a seeded order per
 player. The Elite blocking the road north (Trainer 4) won't fight until both

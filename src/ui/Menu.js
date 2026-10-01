@@ -39,7 +39,7 @@ export class Menu {
         this.container.add(text(scene, cx + (it.badge != null ? 138 : 34), cy + cellH - 34, it.detail, 18, dark ? '#5b5f80' : '#a8acd6'));
       }
       const zone = scene.add.zone(cx, cy, cellW, cellH).setOrigin(0).setInteractive({ useHandCursor: true });
-      zone.on('pointerover', () => { if (this.index !== i) { this.index = i; this.redraw(); } });
+      zone.on('pointerover', () => { if (this.index !== i) { this.index = i; sfx('cursor'); this.redraw(); } });
       zone.on('pointerdown', () => { this.index = i; this.redraw(); this.handle('confirm'); });
       this.container.add(zone);
       return { cx, cy, cellW, cellH, label };

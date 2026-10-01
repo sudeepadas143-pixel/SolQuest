@@ -88,7 +88,7 @@ export class HallOfFameScene extends Phaser.Scene {
 
     const w = s.player.wallet;
     panel(this, 16, 206, 264, 66, 'chip').setDepth(55);
-    text(this, 30, 216, w ? `AIRDROP WALLET\n${w.slice(0, 6)}…${w.slice(-4)}` : 'NO WALLET ON FILE\nAdd one in MENU > PROFILE', 17, w ? '#2ef2a8' : '#ff8a8a', { lineSpacing: 6 }).setDepth(56);
+    text(this, 30, 216, w ? `PAYOUT WALLET\n${w.slice(0, 6)}…${w.slice(-4)}` : 'NO WALLET ON FILE\nAdd one in MENU > PROFILE', 17, w ? '#2ef2a8' : '#ff8a8a', { lineSpacing: 6 }).setDepth(56);
 
     // confetti
     const colors = [0x9945ff, 0x14f195, 0xecbc48, 0xfbf6e9, 0xee4f4b];
