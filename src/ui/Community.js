@@ -60,7 +60,7 @@ export function followX(scene, x, y, depth) {
 export function communityStrip(scene, { x = 16, y = GAME_H - 46, depth = 50 } = {}) {
   const c = scene.add.container(0, 0).setDepth(depth);
   const chip = (cx, w, label, color, onTap) => {
-    c.add(panel(scene, cx, y, w, 34, 'glass'));
+    c.add(panel(scene, cx, y, w, 34, 'chip'));
     const t = text(scene, cx + w / 2, y + 17, label, 17, color, { fontStyle: 'bold' }).setOrigin(0.5);
     const z = scene.add.zone(cx, y, w, 34).setOrigin(0).setInteractive({ useHandCursor: true });
     z.on('pointerover', () => t.setAlpha(0.75)).on('pointerout', () => t.setAlpha(1));
