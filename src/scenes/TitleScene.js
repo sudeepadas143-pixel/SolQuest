@@ -1,6 +1,6 @@
-// Title: a drone flight over the SolQuest overworld. The footage is the game's
+// Title: drone footage of the SolQuest overworld. The footage is the game's
 // own map, tiles and prop models rendered as a 3D world (trailer/src/drone, see
-// trailer/render/drone.mjs) - a seamless loop through one whole day at the
+// trailer/render/drone.mjs) - an edited, seamless loop of shots through one day at the
 // game's 960x640, streamed as a muted video. The first frame is shown instantly
 // and stays as the backdrop if the video can't play.
 import Phaser from 'phaser';

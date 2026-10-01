@@ -1,28 +1,21 @@
-// Drone flight over the SolQuest overworld for the title screen: the game's own
-// map, tiles and prop models as a 3D world. Deterministic: renderAt(t) draws the
-// frame at time t of a seamless LOOP-second loop (one full day passes on the
-// way round). Renders at the game's 960x640 with 4x multisampling; textures keep
-// the game art's crisp texels (nearest up close, mipmapped in the distance).
+// The SolQuest overworld as a 3D world for the title screen: the game's own
+// map, tiles and prop models, filmed as an edited sequence of drone shots
+// through one day (edit.js). Deterministic: renderAt(t) draws the frame at time
+// t of a seamless LOOP-second loop. Renders at the game's 960x640 with 4x
+// multisampling; textures keep the game art's crisp texels (nearest up close,
+// mipmapped in the distance). A final pass does the transitions, the camera
+// blurs (whip pans, focus racks, a light tilt-shift) and the grade.
 import * as THREE from 'three';
 import { buildWorld, U } from './world.js';
+import { LOOP, frameAt } from './edit.js';
 import { OUTDOOR_W, MAP_H } from '@game/data/map.js';
 
 THREE.ColorManagement.enabled = false;
-export const LOOP = 48;
+export { LOOP };
 export const OUT = { w: 960, h: 640 };
-const SHIFT = -0.46;                          // vertical lens shift (NDC): look down without tilting
+const FOV = 46;
 
 // ------------------------------------------------------------ time of day
-// The loop runs from mid-morning through the day, golden hour, night and dawn
-// back to mid-morning. hourAt(u): u in [0,1) -> hour of day (0..24).
-const HOUR_KEYS = [[0, 9], [0.38, 15.8], [0.52, 18.4], [0.6, 20.0], [0.71, 27.2], [0.81, 30.0], [1, 33]];
-function hourAt(u) {
-  let i = 0;
-  while (i < HOUR_KEYS.length - 2 && HOUR_KEYS[i + 1][0] <= u) i++;
-  const [u0, h0] = HOUR_KEYS[i];
-  const [u1, h1] = HOUR_KEYS[i + 1];
-  return (h0 + (h1 - h0) * ((u - u0) / (u1 - u0))) % 24;
-}
 // palette per hour: sky top, horizon, sun colour, sun strength, ambient sky, ambient ground, ambient strength
 const SKY = [
   [0, '#0a1030', '#223064', '#9aaae8', 0.55, '#5a68b8', '#1c2034', 0.9],
@@ -53,22 +46,6 @@ const nightAt = (h) => {
   if (h < 6.4) return 1 - (h - 5) / 1.4;
   return 0;
 };
-
-// ------------------------------------------------------------ the flight
-// A closed loop (tile coordinates, height in tiles): up the main road past the
-// town and the Solace, east over the market and the pond, past the windmill,
-// through the orchard to a sweep around the Elite Hall, then back south down
-// the western woods.
-const PATH = [
-  [22, 138, 12], [24, 121, 8.5], [37, 113, 8.5], [48, 113, 8.5], [58, 98, 8], [59, 82, 7.5],
-  [55, 68, 9.5], [44, 54, 9], [49, 41, 8.5], [39, 26, 9.5], [23, 23, 8.5], [9, 15, 9],
-  [9, 31, 10], [8, 60, 10], [9, 84, 9.5], [12, 104, 10], [14, 128, 12],
-].map(([x, z, y]) => new THREE.Vector3(x, y, z));
-const curve = new THREE.CatmullRomCurve3(PATH, true, 'centripetal', 0.5);
-// landmarks the camera turns towards as it passes (x, z, radius of influence)
-const SIGHTS = [[53, 107, 13], [57, 84, 12], [46, 66, 12], [22, 8, 30], [27, 66, 8], [24, 116, 30]];
-// constant ground speed: sample by arc length
-const pointAt = (u) => curve.getPointAt(((u % 1) + 1) % 1);
 
 // ------------------------------------------------------------ renderer
 export class Drone {
@@ -146,19 +123,20 @@ export class Drone {
 
     this.world = await buildWorld(scene);
 
-    // multisampled target + a light output pass (vignette)
-    this.rt = new THREE.WebGLRenderTarget(OUT.w, OUT.h, { samples: 4, depthBuffer: true });
+    // two multisampled targets (a transition draws both shots) + the final pass
+    const rt = () => new THREE.WebGLRenderTarget(OUT.w, OUT.h, { samples: 4, depthBuffer: true });
+    this.rtA = rt();
+    this.rtB = rt();
+    this.postU = {
+      tA: { value: this.rtA.texture }, tB: { value: this.rtB.texture }, res: { value: new THREE.Vector2(OUT.w, OUT.h) },
+      mode: { value: 0 }, p: { value: 0 }, haze: { value: 0 },
+      blurA: { value: new THREE.Vector2() }, defA: { value: 0 }, tiltA: { value: 0 },
+      blurB: { value: new THREE.Vector2() }, defB: { value: 0 }, tiltB: { value: 0 },
+    };
     this.post = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: this.rt.texture } },
+      uniforms: this.postU,
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-      fragmentShader: `
-        uniform sampler2D tDiffuse; varying vec2 vUv;
-        void main(){
-          vec3 c = texture2D(tDiffuse, vUv).rgb;
-          vec2 q = vUv - 0.5;
-          c *= 1.0 - dot(q, q) * 0.45;
-          gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
-        }`,
+      fragmentShader: POST,
       depthTest: false, depthWrite: false,
     }));
     this.postScene = new THREE.Scene();
@@ -167,47 +145,41 @@ export class Drone {
     return true;
   }
 
-  renderAt(t) {
-    const u = (((t / LOOP) % 1) + 1) % 1;
-    const hour = hourAt(u);
-    const S = skyAt(hour);
-    const night = nightAt(hour);
-    U.uTime.value = t;
+  /** Set up the world for one view (camera, light, sky, clouds, water) and draw it into rt. */
+  drawView(V, rt) {
+    const S = skyAt(V.hour);
+    const night = nightAt(V.hour);
+    U.uTime.value = V.clock;
     U.uNight.value = night;
 
-    // the drone: position on the loop, looking ahead and down the path
+    // Camera: yaw towards the target, never pitch or roll. A vertical lens
+    // shift places the target at screen height V.ty instead, so walls,
+    // columns and trees stay upright.
     const cam = this.camera;
-    const p = pointAt(u);
-    const ahead = pointAt(u + 0.018);
-    const dir = new THREE.Vector3().subVectors(ahead, p).setY(0).normalize();
-    // heading: along the path, turned towards landmarks nearby (yaw only, so
-    // the tilt stays the same and the horizon stays in frame)
-    const head = dir.clone();
-    for (const [sx, sz, r] of SIGHTS) {
-      const d = Math.hypot(sx - p.x, sz - p.z);
-      const w = Math.min(0.8, Math.max(0, 1 - d / r) * 1.1);
-      if (w <= 0 || d < 0.5) continue;
-      const to = new THREE.Vector3(sx - p.x, 0, sz - p.z).normalize();
-      head.lerp(to, w).normalize();
-    }
-    // Architectural framing: the camera itself only tilts down a little and a
-    // lens shift frames the ground below, so vertical lines (the Hall's
-    // columns, walls, trees) stay upright instead of splaying apart. No roll.
-    const look = new THREE.Vector3().copy(p).addScaledVector(head, p.y * 4.2).setY(0);
-    cam.position.copy(p);
+    const d = new THREE.Vector3(V.target.x - V.pos.x, 0, V.target.z - V.pos.z);
+    const dist = Math.max(0.5, d.length());
+    const yaw = Math.atan2(d.x, d.z) + V.yaw;
+    cam.position.copy(V.pos);
     cam.up.set(0, 1, 0);
-    cam.lookAt(look);
+    cam.lookAt(V.pos.x + Math.sin(yaw), V.pos.y, V.pos.z + Math.cos(yaw));
+    cam.fov = FOV;
     cam.updateProjectionMatrix();
-    cam.projectionMatrix.elements[9] = SHIFT;
+    const f = cam.projectionMatrix.elements[5];
+    cam.projectionMatrix.elements[9] = Math.min(0.4, Math.max(-0.8, (f * (V.target.y - V.pos.y)) / dist - V.ty));
     cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
 
-    // sun (or moon) across the sky
-    const ang = ((hour - 6) / 12) * Math.PI;                  // 6h rise in the east, 18h set in the west
+    // sun (or moon) across the sky; the shadow map covers the ground between
+    // the camera and what it looks at
+    const ang = ((V.hour - 6) / 12) * Math.PI;                  // 6h rise in the east, 18h set in the west
     let sd = new THREE.Vector3(Math.cos(ang) * 0.9, Math.sin(ang), -0.35 + 0.2 * Math.cos(ang));
     if (sd.y < 0.08) sd = new THREE.Vector3(-Math.cos(ang) * 0.6, 0.55, -0.4);   // moonlight
     sd.normalize();
-    this.sun.position.copy(look).addScaledVector(sd, 120);
-    this.sun.target.position.copy(look);
+    const focus = new THREE.Vector3(V.pos.x, 0, V.pos.z).lerp(new THREE.Vector3(V.target.x, 0, V.target.z), 0.55);
+    const half = Math.min(60, Math.max(26, dist * 0.8 + 14));
+    const sc = this.sun.shadow.camera;
+    if (sc.right !== half) { sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half; sc.updateProjectionMatrix(); }
+    this.sun.position.copy(focus).addScaledVector(sd, 120);
+    this.sun.target.position.copy(focus);
     this.sun.color.copy(S.sun);
     this.sun.intensity = S.sunK * Math.PI * 0.55;    // (physically based lights: x pi, then tuned so noon ~ 1)
     this.hemi.color.copy(S.skyAmb);
@@ -223,25 +195,103 @@ export class Drone {
 
     // clouds drift east, wrapping around the map (whiter by day, dim at night)
     for (const c of this.clouds.children) {
-      const d = c.userData;
-      const x = ((d.x + t * 0.9) % 130) - 30;
-      c.position.set(x, d.y, d.z);
+      const u = c.userData;
+      c.position.set(((u.x + V.clock * 0.9) % 130) - 30, u.y, u.z);
     }
     // clouds pick up the sky: lit by the sun, filled with the horizon colour
     this.cloudMat.emissive.copy(S.horizon).multiplyScalar(0.55);
     this.cloudMat.color.setRGB(1, 1, 1).multiplyScalar(0.5 + 0.5 * (1 - night));
 
     // water drifts, lamps glow after dark
-    this.world.wtex.offset.set((t * 0.05) % 1, (t * 0.03) % 1);
+    this.world.wtex.offset.set((V.clock * 0.05) % 1, (V.clock * 0.03) % 1);
     for (const g of this.world.glows) g.material.opacity = night * 0.9;
 
-    const r = this.renderer;
-    r.setRenderTarget(this.rt);
-    r.render(this.scene, cam);
-    r.setRenderTarget(null);
-    r.render(this.postScene, this.postCam);
-    return { hour: +hour.toFixed(2), night: +night.toFixed(2), pos: [p.x, p.y, p.z].map((v) => +v.toFixed(1)) };
+    this.renderer.setRenderTarget(rt);
+    this.renderer.render(this.scene, cam);
+  }
+
+  renderAt(t) {
+    const { A, B, mix } = frameAt(t);
+    const P = this.postU;
+    this.drawView(A, this.rtA);
+    if (B) this.drawView(B, this.rtB);
+    P.mode.value = { none: 0, dissolve: 1, mist: 2, leak: 3, focus: 4, dip: 5 }[mix.type];
+    P.p.value = mix.p ?? 0;
+    P.haze.value = mix.haze ?? 0;
+    P.blurA.value.set(...A.blur); P.defA.value = A.defocus; P.tiltA.value = A.tilt;
+    if (B) { P.blurB.value.set(...B.blur); P.defB.value = B.defocus; P.tiltB.value = B.tilt; }
+    this.renderer.setRenderTarget(null);
+    this.renderer.render(this.postScene, this.postCam);
+    return { shot: A.shot, to: B?.shot, mix: mix.type, p: +(mix.p ?? 0).toFixed(2), hour: +A.hour.toFixed(2) };
   }
 }
+
+// ------------------------------------------------------------ final pass
+// Per shot: camera blur (whip-pan streak, focus rack, a light tilt-shift that
+// keeps a band through the middle sharp). Then the transition, then the grade.
+const POST = `
+  uniform sampler2D tA, tB; uniform vec2 res;
+  uniform int mode; uniform float p, haze;
+  uniform vec2 blurA, blurB; uniform float defA, defB, tiltA, tiltB;
+  varying vec2 vUv;
+
+  vec3 shot(sampler2D tex, vec2 uv, vec2 streak, float defocus, float tilt) {
+    float rad = defocus + tilt * smoothstep(0.1, 0.42, abs(uv.y - 0.44));
+    if (rad < 0.05 && dot(streak, streak) < 0.01) return texture2D(tex, uv).rgb;
+    vec3 acc = vec3(0.0);
+    for (int i = 0; i < 24; i++) {
+      float f = (float(i) + 0.5) / 24.0;
+      float a = float(i) * 2.39996;
+      vec2 o = streak * (f - 0.5) + vec2(cos(a), sin(a)) * sqrt(f) * rad;
+      acc += texture2D(tex, uv + o / res).rgb;
+    }
+    return acc / 24.0;
+  }
+  float hash(vec2 q) { return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453); }
+  float noise(vec2 q) {
+    vec2 i = floor(q), f = fract(q); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+  }
+  float fbm(vec2 q) { return noise(q) * 0.55 + noise(q * 2.1 + 3.7) * 0.3 + noise(q * 4.3 + 9.1) * 0.15; }
+
+  void main() {
+    vec3 a = shot(tA, vUv, blurA, defA, tiltA);
+    vec3 c = a;
+    if (mode > 0) {
+      vec3 b = shot(tB, vUv, blurB, defB, tiltB);
+      float s = sin(3.14159 * p);
+      if (mode == 1) {                                   // dissolve
+        c = mix(a, b, smoothstep(0.0, 1.0, p));
+      } else if (mode == 2) {                            // mist: noise-edged, through haze
+        vec2 q = vUv * vec2(3.0, 2.0) + vec2(p * 0.8, p * 0.2);
+        float n = fbm(q);
+        float e = p * 1.5 - 0.25;
+        c = mix(a, b, smoothstep(n - 0.25, n + 0.25, e));
+        float h = haze * s * (0.65 + 0.35 * fbm(q * 1.7 + 5.0));
+        c = mix(c, vec3(0.88, 0.89, 0.92), h);
+      } else if (mode == 3) {                            // warm light leak sweeping across
+        c = mix(a, b, smoothstep(0.2, 0.8, p));
+        vec2 lc = vec2(mix(-0.25, 1.25, p), 0.62);
+        vec2 dq = (vUv - lc) * vec2(1.5, 1.0);
+        float g = exp(-dot(dq, dq) * 3.0) * s * 0.3;
+        vec3 L = vec3(1.0, 0.62, 0.3) * g + vec3(0.06, 0.03, 0.0) * s;
+        c = 1.0 - (1.0 - c) * (1.0 - L);
+      } else if (mode == 4) {                            // focus rack
+        c = mix(a, b, smoothstep(0.35, 0.65, p));
+      } else if (mode == 5) {                            // dip to night
+        c = mix(a, b, smoothstep(0.42, 0.58, p));
+        c = mix(c, vec3(0.025, 0.03, 0.075), pow(s, 0.8) * 0.82);
+      }
+    }
+    // grade: cool lifted shadows, a gentle S-curve, warm highlights, a touch of colour
+    c += vec3(0.018, 0.022, 0.04) * (1.0 - c);
+    c = mix(c, c * c * (3.0 - 2.0 * c), 0.22);
+    float l = dot(c, vec3(0.299, 0.587, 0.114));
+    c *= mix(vec3(1.0), vec3(1.035, 1.0, 0.95), smoothstep(0.45, 1.0, l));
+    c = mix(vec3(l), c, 1.08);
+    vec2 v = vUv - 0.5;
+    c *= 1.0 - dot(v, v) * 0.5;
+    gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+  }`;
 
 export { OUTDOOR_W, MAP_H };

@@ -90,17 +90,15 @@ Made for the trailer only: the leaderboard and pool graphics, and
 the damage numbers. The leaderboard names, times, pool amount and trades are
 illustrative. The trailer contains no contract address.
 
-## Title-screen drone flight
+## Title-screen drone footage
 
-The game's main menu plays a looping drone flight over the overworld, rendered
-as a 3D world from the game's own data:
+The game's main menu plays an edited, looping sequence of drone shots over the
+overworld, rendered as a 3D world from the game's own data:
 
 ```bash
 python3 drone/export_props.py     # the game's prop models (tools/props3d.py) -> textured 3D meshes (drone/assets/props)
 npm run dev                        # then open http://127.0.0.1:5174/drone.html?play for a live preview
-node render/drone.mjs              # 48 s loop, 4 workers, resumable -> ../public/assets/title/drone.{mp4,webm} + poster.jpg
-node render/drone_seam.mjs && python3 drone/blend_seam.py && node render/drone.mjs --encode --crf 28
-                                   # render 1 s past the end and cross-fade it into the start: a seamless wrap
+node render/drone.mjs --crf 28     # 56 s loop, 4 workers, resumable -> ../public/assets/title/drone.{mp4,webm} + poster.jpg
 ```
 
 - **Models** (`drone/export_props.py`):
@@ -120,12 +118,29 @@ node render/drone_seam.mjs && python3 drone/blend_seam.py && node render/drone.m
   - Renders at the game's 960x640 with 4x multisampling.
   - Soft shadows from a 4096 shadow map, drifting clouds, fog, and a sky dome
     with sun, moon and stars.
-- **Flight**:
-  - A closed Catmull-Rom loop over the town, Market Square, Willow Pond, the
-    windmill, the orchard and the Elite Hall.
-  - The camera turns (yaw only) toward landmarks as it passes them.
-  - One full day passes per loop (morning, golden hour, night with lit windows
-    and lamps, dawn), so the video loops seamlessly.
+- **Edit** (`src/drone/edit.js`): eight shots through one day, each its own
+  slow camera move, joined by six kinds of transition.
+
+  | Shot | Hour | Move | Into the next shot |
+  |---|---|---|---|
+  | Dawn climb | 6:30-8:50 | lifts off the main road and climbs over the route | whip pan |
+  | Market Square | 10:30 | slow arc round the fountain and gazebo (light tilt-shift) | mist |
+  | Willow Pond | 13:00 | skims the water out along the pier | whip pan |
+  | Windmill | 15:30 | low through the grass towards the windmill | mist (through haze) |
+  | Overview | 16:00 | rises high over the route, the Hall far to the north | warm light leak |
+  | Approach | 18:00 | golden hour up the approach to the Elite Hall | focus rack |
+  | Hall at dusk | 19:00 | arcs up round the Hall against the sunset | dip to night |
+  | Night road | 22:30 | down the lamplit road into town | time-lapse dissolve to dawn |
+
+  - The camera only yaws; a lens shift frames the subject, so walls and columns
+    stay upright.
+  - The final pass (`main.js`) draws both shots during a transition and does
+    the whip-pan motion blur, the focus racks, the tilt-shift and a soft grade
+    (cool shadows, warm highlights, vignette). Nothing flashes: the brightest
+    moment is the light leak's gentle warm sweep.
+  - Each shot runs on its own clock (clouds, water, grass), and the last
+    transition ends exactly on t = 0, so the loop is seamless and frame 0 (the
+    poster) is a clean frame.
 - **In the game** (`src/scenes/TitleScene.js`): the poster shows at once and the
   video streams in, muted. It offers H.264 first and VP9 as a fallback. If the
   video can't play, the poster stays as the backdrop.

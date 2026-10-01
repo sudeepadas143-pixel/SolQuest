@@ -1,4 +1,4 @@
-// Renders the title-screen drone flight (drone.html) frame by frame and encodes
+// Renders the title-screen drone footage (drone.html, the edit in src/drone/edit.js) frame by frame and encodes
 // the seamless loop for the game: public/assets/title/drone.{mp4,webm} + poster.jpg.
 //
 //   node render/drone.mjs                 render every frame (4 parallel workers), then encode
@@ -13,9 +13,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { ROOT, server, ffmpegPath } from './common.mjs';
+import { LOOP } from '../src/drone/edit.js';
 
 const FPS = 30;
-const LOOP = 48;
 const N = LOOP * FPS;
 const OUT = path.resolve(ROOT, '..', 'public', 'assets', 'title');
 const FRAMES = path.join(ROOT, 'out', 'drone-frames');
