@@ -108,6 +108,29 @@ def squash(a, k, pivot_y):
     return out
 
 
+def pitch_body(a, k, neck_y, pivot_y, nod=0):
+    """Lean toward (k < 1) or away from (k > 1) the camera, seen from the front
+    or back. Under the ~46 degree camera a forward lean toward the viewer
+    shortens the torso on screen and drops the head; leaning away shows more
+    of the back and lifts it. Only the torso (neck to hips) is resized, so the
+    face never distorts; the head rides on top (plus an optional nod)."""
+    if abs(k - 1) < 1e-3 and not nod:
+        return a
+    head = a[:neck_y].copy()
+    torso = a[neck_y:pivot_y]
+    big = scale2x(scale2x(torso))
+    newH = max(4, int(round(big.shape[0] * k / 4)) * 4)
+    small = majority_down(np.asarray(Image.fromarray(big, 'RGBA').resize((big.shape[1], newH), Image.NEAREST)), 4)
+    out = np.zeros_like(a)
+    out[pivot_y:] = a[pivot_y:]
+    h = small.shape[0]
+    top = pivot_y - h
+    out[top:pivot_y] = over(out[top:pivot_y], small)
+    dy = (top - neck_y) + nod                    # + = down
+    hd = shift(np.concatenate([head, np.zeros((a.shape[0] - neck_y, *a.shape[1:]), np.uint8)]), dy=dy)
+    return over(out, hd)
+
+
 def outline(layer, color=OUTLINE):
     m = opaque(layer)
     ring = ndimage.binary_dilation(m, structure=np.ones((3, 3))) & ~m
@@ -382,11 +405,15 @@ class Rig:
             f = over(f, body)
             f = over(f, self._arm_side(cv, ns, nsh, nel, False))
         else:
-            # lean toward (front) / away from (back) the camera: crouch the
-            # body over the hips, drop the shoulders with it, sway sideways
-            k = 1 - p.get('crouch', 0)
+            # lean in the direction of travel: toward the camera (down) the
+            # torso foreshortens and the head drops; away from it (up) the
+            # back lengthens and the head lifts. Shoulders follow the torso.
+            pitch = p.get('pitch', 0)
+            k = 1 - pitch if self.view == 'down' else 1 + pitch * 0.6
             pivot_y = int(round(hip_pivot[1]))
-            body = squash(body, k, pivot_y)
+            neck_y = self.P((0, cfg['torso'][1]))[1]
+            nod = int(round(pitch * 8)) if self.view == 'down' else 0
+            body = pitch_body(body, k, neck_y, pivot_y, nod)
             sway = p.get('sway', 0)
             if sway:
                 body = shift(body, dx=sway)
@@ -432,24 +459,25 @@ class Rig:
 
 SIDE = {
     'idle':  dict(legs=((3, 2), (-3, 2)), arms=((-4, 8), (4, 8))),
-    'walk1': dict(lean=2, legs=((24, 6), (-22, 20)), arms=((-26, 14), (26, 22))),
-    'walk2': dict(lean=2, legs=((-22, 20), (24, 6)), arms=((26, 22), (-26, 14))),
-    'run1':  dict(lean=12, legs=((36, 16), (-38, 88)), arms=((-48, 95), (52, 100))),
-    'run2':  dict(lean=12, bob=3, legs=((-6, 10), (44, 100)), arms=((-6, 100), (12, 100))),
-    'run3':  dict(lean=12, legs=((-38, 88), (36, 16)), arms=((52, 100), (-48, 95))),
-    'run4':  dict(lean=12, bob=3, legs=((44, 100), (-6, 10)), arms=((12, 100), (-6, 100))),
+    'walk1': dict(lean=4, legs=((24, 6), (-22, 20)), arms=((-26, 14), (26, 22))),
+    'walk2': dict(lean=4, legs=((-22, 20), (24, 6)), arms=((26, 22), (-26, 14))),
+    'run1':  dict(lean=14, legs=((36, 16), (-38, 88)), arms=((-48, 95), (52, 100))),
+    'run2':  dict(lean=14, bob=3, legs=((-6, 10), (44, 100)), arms=((-6, 100), (12, 100))),
+    'run3':  dict(lean=14, legs=((-38, 88), (36, 16)), arms=((52, 100), (-48, 95))),
+    'run4':  dict(lean=14, bob=3, legs=((44, 100), (-6, 10)), arms=((12, 100), (-6, 100))),
 }
 FRONT = {
     # arms: (elbow out, elbow down, hand out(+)/in(-), hand down, layer)
     'idle':  dict(legs=((0, 0), (0, 0)), arms=((1, 7, 0, 6), (1, 7, 0, 6))),
-    'walk1': dict(sway=1, legs=((38, 0), (8, 1)), arms=((1, 6, -2, 3, 'front'), (2, 7, 1, 7, 'back'))),
-    'walk2': dict(sway=-1, legs=((8, 1), (38, 0)), arms=((2, 7, 1, 7, 'back'), (1, 6, -2, 3, 'front'))),
-    # run: crouched lean, hard arm pump (front hand up to the chest, back arm
-    # behind the body), high knee drive, airborne passing frames
-    'run1':  dict(crouch=0.08, bob=1, sway=1, legs=((78, -2), (14, 0)), arms=((2, 5, -7, -4, 'front'), (4, 6, 2, 6, 'back'))),
-    'run2':  dict(crouch=0.05, bob=4, legs=((30, 0), (30, 0)), arms=((3, 6, -3, 1, 'front'), (3, 6, -3, 1, 'front'))),
-    'run3':  dict(crouch=0.08, bob=1, sway=-1, legs=((14, 0), (78, -2)), arms=((4, 6, 2, 6, 'back'), (2, 5, -7, -4, 'front'))),
-    'run4':  dict(crouch=0.05, bob=4, legs=((30, 0), (30, 0)), arms=((3, 6, -3, 1, 'front'), (3, 6, -3, 1, 'front'))),
+    # walk: a slight lean into each step
+    'walk1': dict(pitch=0.05, sway=1, legs=((38, 0), (8, 1)), arms=((1, 6, -2, 3, 'front'), (2, 7, 1, 7, 'back'))),
+    'walk2': dict(pitch=0.05, sway=-1, legs=((8, 1), (38, 0)), arms=((2, 7, 1, 7, 'back'), (1, 6, -2, 3, 'front'))),
+    # run: a real forward lean, hard arm pump (front hand up to the chest,
+    # back arm behind the body), high knee drive, airborne passing frames
+    'run1':  dict(pitch=0.18, bob=1, sway=1, legs=((78, -2), (14, 0)), arms=((2, 5, -7, -4, 'front'), (4, 6, 2, 6, 'back'))),
+    'run2':  dict(pitch=0.15, bob=4, legs=((30, 0), (30, 0)), arms=((3, 6, -3, 1, 'front'), (3, 6, -3, 1, 'front'))),
+    'run3':  dict(pitch=0.18, bob=1, sway=-1, legs=((14, 0), (78, -2)), arms=((4, 6, 2, 6, 'back'), (2, 5, -7, -4, 'front'))),
+    'run4':  dict(pitch=0.15, bob=4, legs=((30, 0), (30, 0)), arms=((3, 6, -3, 1, 'front'), (3, 6, -3, 1, 'front'))),
 }
 ORDER = ['idle', 'walk1', 'walk2', 'run1', 'run2', 'run3', 'run4']
 

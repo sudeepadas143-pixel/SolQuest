@@ -27,6 +27,7 @@ import { wait } from '../ui/helpers.js';
 import { used } from '../systems/hints.js';
 
 const DELTA = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
 
 /** Each Elite has their own encounter + battle theme, keyed by character design
  *  (the route order is shuffled per player). Falls back to the generic themes. */
@@ -301,6 +302,34 @@ export class OverworldScene extends Phaser.Scene {
     this.player.setFrame(this.idleFrame(dir));
   }
 
+  /** About-turn: flash the side view for a beat before facing `dir`. */
+  pivotThrough(dir) {
+    const side = dir === 'up' || dir === 'down' ? (this.stepParity ? 'left' : 'right') : 'down';
+    this.player.setFrame(this.idleFrame(side));
+    this.time.delayedCall(60, () => { if (!this.moving && this.facing === dir) this.player.setFrame(this.idleFrame(dir)); });
+  }
+
+  /** A little kicked-up dust at (x, y). */
+  puff(x, y, n = 4) {
+    for (let i = 0; i < n; i++) {
+      const d = this.add.ellipse(x + looseRng.int(-5, 5), y - 1, 4, 3, 0xd8c8a4, 0.75).setDepth(y + 0.6);
+      this.tweens.add({
+        targets: d, x: d.x + looseRng.int(-9, 9), y: d.y - looseRng.int(2, 6), scaleX: 2.2, scaleY: 1.8, alpha: 0,
+        duration: looseRng.int(320, 520), ease: 'Sine.easeOut', onComplete: () => d.destroy(),
+      });
+    }
+  }
+
+  /** Footprints in sand: two soft prints that fade out. */
+  footprint(x, y, dir) {
+    const [dx, dy] = DELTA[dir];
+    const side = this.stepParity ? 1 : -1;
+    const px = x + (dy ? side * 3 : 0);
+    const py = y - 2 + (dx ? side * 1.5 : 0);
+    const f = this.add.ellipse(px, py, dy ? 3 : 4, dy ? 4 : 2.5, 0x8a6e45, 0.4).setDepth(-4);
+    this.tweens.add({ targets: f, alpha: 0, delay: 2600, duration: 1800, onComplete: () => f.destroy() });
+  }
+
   updateMusic(force = false) {
     if (this.indoors) {
       if (force) music(this.hallTrack());
@@ -326,12 +355,21 @@ export class OverworldScene extends Phaser.Scene {
     }
     if (!dir) {
       if (Number(this.player.frame.name) !== this.idleFrame(this.facing)) this.face(this.facing);
+      if (time - this.lastMoveEnd > 120) this.lastRun = false;
       return;
     }
     const continuing = time - this.lastMoveEnd < 60;
     if (dir !== this.facing) {
+      const turnBack = OPPOSITE[dir] === this.facing;
       this.face(dir);
-      if (!continuing) { this.turnUntil = time + 90; return; }
+      if (!continuing) {
+        // turning on the spot; turning right round passes through a side
+        // frame first, so the body visibly pivots
+        if (turnBack) this.pivotThrough(dir);
+        this.turnUntil = time + (turnBack ? 120 : 90);
+        return;
+      }
+      if (turnBack && this.lastRun) this.puff(this.player.x, this.player.y, 5);   // skidding round
     }
     if (time < this.turnUntil) return;
     this.tryStep(dir);
@@ -365,6 +403,10 @@ export class OverworldScene extends Phaser.Scene {
     this.player.setFrame(row + seq[0]);
     const dur = running ? RUN_MS : WALK;
     const t0 = this.time.now;
+    // breaking into a run kicks up a little dust
+    if (running && !this.lastRun) this.puff(this.player.x, this.player.y, 4);
+    this.lastRun = running;
+    if (this.map.ground[this.pos.y]?.[this.pos.x] === 'sand') this.footprint(this.player.x, this.player.y, dir);
     if (!this.path) used(running ? 'run' : 'move');      // the controls legend learns as you go
     if (this.map.isEncounter(nx, ny)) {
       // the rustle starts as you push in, the blades shake mid-stride
@@ -379,13 +421,17 @@ export class OverworldScene extends Phaser.Scene {
       duration: dur,
       onUpdate: () => {
         const k = (this.time.now - t0) / dur;
-        this.player.setFrame(row + seq[k < (running ? 0.5 : 0.55) ? 0 : 1]);
+        const second = k >= (running ? 0.5 : 0.55);
+        this.player.setFrame(row + seq[second ? 1 : 0]);
         this.player.setDepth(this.player.y + 0.5);
+        // airborne run frames: the shadow tightens under the feet
+        this.shadow.setScale(running && second ? 0.82 : 1);
         this.shadow.setPosition(this.player.x, this.player.y - 1).setDepth(this.player.depth - 0.2);
       },
       onComplete: () => {
         this.pos = { x: nx, y: ny };
         this.moving = false;
+        this.shadow.setScale(1);
         this.lastMoveEnd = this.time.now;
         this.syncPlayer();
         this.afterStep();
