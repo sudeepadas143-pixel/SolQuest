@@ -674,22 +674,34 @@ def shop():
     return _r(m, 'shop', (0, D, 0))
 
 
-def windmill():
-    """Landmark: stone windmill with a red cap and four lattice sails."""
+WINDMILL_FRAMES = 8          # sail frames over a quarter turn (four sails: the cycle repeats every 90 degrees)
+
+
+def windmill(sails=True, body=True, turn=0.0):
+    """Landmark: stone windmill with a red cap and four lattice sails.
+    The game draws the tower (body only) and turns the sails over it
+    (sails only, one render per `turn` angle, same anchor)."""
     m = Model()
-    m.cone(32, 34, 0, 58, 17, 11, I.stone('#ddd6c8', size=4), sides=12, top=I.flat('#8a3a3a'))
-    m.cone(32, 34, 58, 76, 13.5, 0, I.shingles('#a8423a', row=3, tile=4), sides=12)
-    m.box(28, 48, 0, 36, 51.5, 14, I.planks('#7a5236'), south=I.decal(I.planks('#7a5236'), [((0, 0, 8, 14), I.door_decal(wood='#7a5236', frame='#4a2e1a'))]))
-    m.box(29.5, 46, 36, 34.5, 50, 42, I.flat('#ddd6c8'), south=I.decal(I.flat('#ddd6c8'), [((0, 0, 5, 6), I.window_decal())]))
+    if body:
+        m.cone(32, 34, 0, 58, 17, 11, I.stone('#ddd6c8', size=4), sides=12, top=I.flat('#8a3a3a'))
+        m.cone(32, 34, 58, 76, 13.5, 0, I.shingles('#a8423a', row=3, tile=4), sides=12)
+        m.box(28, 48, 0, 36, 51.5, 14, I.planks('#7a5236'), south=I.decal(I.planks('#7a5236'), [((0, 0, 8, 14), I.door_decal(wood='#7a5236', frame='#4a2e1a'))]))
+        m.box(29.5, 46, 36, 34.5, 50, 42, I.flat('#ddd6c8'), south=I.decal(I.flat('#ddd6c8'), [((0, 0, 5, 6), I.window_decal())]))
     hub = np.array((32, 49.5, 56))
+    if not sails:
+        m.ellipsoid(tuple(hub + np.array((0, 1, 0))), (2.4, 2.4, 2.4), I.flat('#6b4428'))
+        return _r(m, 'windmill', (0, 64, 0))
     sail = I.decal(I.flat('#efe4cc'), [((0, 0, 999, 999), stripes('#efe4cc', '#a88a5e', 3))])
-    for ang in (np.pi / 4, 3 * np.pi / 4, 5 * np.pi / 4, 7 * np.pi / 4):
+    for ang in (np.pi / 4 + turn, 3 * np.pi / 4 + turn, 5 * np.pi / 4 + turn, 7 * np.pi / 4 + turn):
         d = np.array((np.cos(ang), 0, np.sin(ang)))
         pp = np.array((-np.sin(ang), 0, np.cos(ang)))
         a0, a1 = hub + d * 3, hub + d * 30
         m.quad(a0 - pp * 0.6, a1 - pp * 0.6, a1 + pp * 5, a0 + pp * 5, sail, frame=(a0, d, pp))
         m.quad(a0 - pp * 0.8, a1 - pp * 0.8, a1 + pp * 0.3, a0 + pp * 0.3, I.flat('#6b4428'), frame=(a0, d, pp))
     m.ellipsoid(tuple(hub + np.array((0, 1, 0))), (2.4, 2.4, 2.4), I.flat('#6b4428'))
+    if not body:
+        # the sails alone: no cast shadow (the tower's render has the ground), crisp edges
+        return m.render((0, 64, 0), cast=False, shadow_alpha=0)
     return _r(m, 'windmill', (0, 64, 0))
 
 
@@ -1117,7 +1129,7 @@ def build_all():
         ('house_cabin', lambda: house_cabin()),
         ('house_L', lambda: house_L()),
         ('shop', lambda: shop()),
-        ('windmill', lambda: windmill()),
+        ('windmill', lambda: windmill(sails=False)),
         ('gazebo', lambda: gazebo()),
         ('fountain', lambda: fountain()),
         ('well', lambda: well()),
@@ -1150,6 +1162,8 @@ def build_all():
         ('brazier', lambda: brazier()),
         ('brazier_cold', lambda: brazier(lit=False)),
         ('floor_emblem', lambda: floor_emblem()),
+    ] + [(f'windmill_sails{k}', (lambda k=k: windmill(body=False, turn=-(np.pi / 2) * k / WINDMILL_FRAMES)))
+         for k in range(WINDMILL_FRAMES)] + [
         ('hall_stage', lambda: hall_stage()),
         ('hall_gate', lambda: hall_gate()),
         ('hall_gate_open', lambda: hall_gate(open_=True)),

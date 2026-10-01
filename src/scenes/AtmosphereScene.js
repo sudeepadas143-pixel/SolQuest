@@ -88,7 +88,7 @@ export class AtmosphereScene extends Phaser.Scene {
         const [sx, sy] = toScreen(l.x, l.y);
         const flick = 0.92 + 0.08 * Math.sin(time / 170 + l.x * 0.13);
         this.glows[used].setVisible(true).setPosition(sx, sy).setTint(l.color)
-          .setScale((l.r * z) / 64).setAlpha(Math.min(0.6, L * 0.6) * flick);
+          .setScale((l.r * z) / 64).setAlpha(Math.min(0.6, L * 0.6) * flick * (l.a ?? 1));
         used++;
       }
     }

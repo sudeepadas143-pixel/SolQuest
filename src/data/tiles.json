@@ -850,9 +850,9 @@
       ]
     },
     "windmill": {
-      "w": 387,
+      "w": 263,
       "h": 302,
-      "ax": 13,
+      "ax": -40,
       "ay": 327,
       "lights": [
         [
@@ -1666,6 +1666,62 @@
           "#ffdc89"
         ]
       ]
+    },
+    "windmill_sails0": {
+      "w": 387,
+      "h": 217,
+      "ax": 13,
+      "ay": 295,
+      "lights": []
+    },
+    "windmill_sails1": {
+      "w": 381,
+      "h": 220,
+      "ax": 2,
+      "ay": 297,
+      "lights": []
+    },
+    "windmill_sails2": {
+      "w": 396,
+      "h": 232,
+      "ax": 15,
+      "ay": 305,
+      "lights": []
+    },
+    "windmill_sails3": {
+      "w": 404,
+      "h": 238,
+      "ax": 23,
+      "ay": 309,
+      "lights": []
+    },
+    "windmill_sails4": {
+      "w": 404,
+      "h": 241,
+      "ax": 27,
+      "ay": 311,
+      "lights": []
+    },
+    "windmill_sails5": {
+      "w": 396,
+      "h": 243,
+      "ax": 29,
+      "ay": 312,
+      "lights": []
+    },
+    "windmill_sails6": {
+      "w": 381,
+      "h": 238,
+      "ax": 28,
+      "ay": 309,
+      "lights": []
+    },
+    "windmill_sails7": {
+      "w": 386,
+      "h": 231,
+      "ax": 23,
+      "ay": 304,
+      "lights": []
     }
   }
 }

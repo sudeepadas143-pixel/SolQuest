@@ -249,6 +249,17 @@ const SFX = {
     noise(0.12, { vol: 0.08, filter: 'highpass', f: 3000, f1: 5000, at: 0.18 });
     tone('sine', 90, 0.4, { vol: 0.08, f1: 60 });
   },
+  // ambient: a small bird somewhere nearby (two or three quick rising tweets)
+  chirp: () => {
+    const n = 2 + Math.floor(Math.random() * 2);
+    const f = 2600 + Math.random() * 900;
+    for (let i = 0; i < n; i++) tone('sine', f, 0.05, { vol: 0.016, f1: f * 1.35, at: i * 0.09, attack: 0.004, release: 0.03 });
+  },
+  // ambient: crickets in the night grass (a soft trill)
+  cricket: () => {
+    const f = 4300 + Math.random() * 500;
+    for (let i = 0; i < 6; i++) tone('triangle', f, 0.022, { vol: 0.007, at: i * 0.045, attack: 0.002, release: 0.01 });
+  },
   // every flame in the Hall flaring at once
   flare: () => {
     noise(1.2, { vol: 0.26, filter: 'lowpass', f: 400, f1: 4000, q: 0.5 });

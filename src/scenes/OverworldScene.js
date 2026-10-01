@@ -25,6 +25,7 @@ import { looseRng } from '../systems/rng.js';
 import { heldDirection, isHeld, pushFocusToken } from '../systems/controls.js';
 import { wait, tween } from '../ui/helpers.js';
 import { used } from '../systems/hints.js';
+import { Ambient } from './ambient.js';
 
 const DELTA = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
@@ -143,6 +144,7 @@ export class OverworldScene extends Phaser.Scene {
     this.buildGrass();
     this.syncPlayer();
     this.buildHallDust();
+    this.ambient = new Ambient(this);
     this.hallReset();
     this.unlockCheckpoints();
 
@@ -360,8 +362,9 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   // ------------------------------------------------------------------- update
-  update(time) {
+  update(time, delta) {
     if (!this.save) return;
+    this.ambient?.update(time, delta);
     if (!this.locked) this.updateMusic();
     if (this.moving || this.locked || !this.focus.isTop()) return;
     if (this.pendingClick) { const c = this.pendingClick; this.pendingClick = null; this.planTo(c.x, c.y); }
