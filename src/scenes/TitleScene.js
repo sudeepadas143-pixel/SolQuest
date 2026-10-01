@@ -28,7 +28,17 @@ export class TitleScene extends Phaser.Scene {
     // H.264 for Safari / iOS, VP9 for browsers without H.264; muted so it autoplays everywhere
     this.flight.loadURL([`${VIDEO}.mp4`, `${VIDEO}.webm`], true);
     this.flight.play(true);
-    this.flight.once('playing', () => this.tweens.add({ targets: this.flight, alpha: 1, duration: 700 }));
+    // fade in once frames are actually advancing (a cached video can start
+    // before Phaser's own 'playing' listener is attached, so don't wait on it)
+    const fadeIn = this.time.addEvent({
+      delay: 100, loop: true,
+      callback: () => {
+        const el = this.flight.video;
+        if (!el || el.paused || el.currentTime <= 0) return;
+        fadeIn.remove();
+        this.tweens.add({ targets: this.flight, alpha: 1, duration: 700 });
+      },
+    });
     this.events.once('shutdown', () => this.flight?.stop());
 
     // --- screen dressing: shade behind the logo and the prompt, a faint CRT
