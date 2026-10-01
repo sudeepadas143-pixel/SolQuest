@@ -15,6 +15,7 @@ let muted = false;
 try { muted = localStorage.getItem('eliteRoute.muted') === '1'; } catch { /* ignore */ }
 
 let wantTrack = null;
+let wantOpts = {};
 let current = null; // { name, step, next, timer, gain }
 
 const NOTE = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11 };
@@ -68,7 +69,7 @@ export function unlockAudio() {
   noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
   const d = noiseBuf.getChannelData(0);
   for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-  if (wantTrack) startTrack(wantTrack);
+  if (wantTrack) startTrack(wantTrack, wantOpts);
 }
 
 /** Stereo noise impulse with an exponential tail (a small, soft room). */
@@ -323,7 +324,13 @@ function play(instr, f, dur, at, vol, bus, send = false) {
 
 function parse(str) { return str ? str.split(/\s+/).filter(Boolean) : []; }
 
-function startTrack(name) {
+/**
+ * opts.sync: () => seconds | null. Keeps the track locked to an external clock
+ * that loops with it (the title video): the track starts at that position and
+ * re-syncs at the top of every loop (a looping video pauses a little at its
+ * wrap, so the two would otherwise drift apart). null = clock not running.
+ */
+function startTrack(name, opts = {}) {
   stopTrack();
   const tr = TRACKS[name];
   if (!tr || !ctx) return;
@@ -338,23 +345,51 @@ function startTrack(name) {
   cur.len = Math.max(cur.lead.length, cur.bass.length, cur.drums.length, cur.pad.length, cur.harm.length);
   const stepDur = 60 / tr.bpm / 4;
   const holdLen = (arr, i) => { let n = 1; while (arr[(i + n) % arr.length] === '-' && n < 64) n++; return n; };
-  const voice = (arr, instr, vol, send) => {
+  // resume: when starting mid-track, also sound a note that is being held
+  // through this step (struck earlier), for the rest of its length
+  const voice = (arr, instr, vol, send, resume = false) => {
     if (!arr.length) return;
     const i = cur.step % arr.length;
-    const fs = chord(arr[i]);
+    let j = i;
+    if (resume) while (arr[j] === '-' && j > 0) j--;
+    const fs = chord(arr[j]);
     if (!fs.length) return;
     const dur = stepDur * holdLen(arr, i) * 0.96;
     const at = cur.next - ctx.currentTime;
     for (const f of fs) play(instr, f, dur, at, vol / Math.sqrt(fs.length), gain, send);
   };
+  const loopLen = cur.len * stepDur;
+  let resume = false;
+  // jump to position `pos` (seconds into the loop), at the next step boundary
+  const seek = (pos) => {
+    const now = ctx.currentTime;
+    const p = (((pos + 0.06) % loopLen) + loopLen) % loopLen;
+    const k = Math.ceil(p / stepDur - 1e-6);
+    cur.next = now + 0.06 + (k * stepDur - p);
+    cur.step = k % cur.len;
+    resume = true;
+  };
+  const clock = () => { const v = opts.sync?.(); return Number.isFinite(v) ? v : null; };
+  if (clock() !== null) seek(clock());
   const schedule = () => {
     while (cur.next < ctx.currentTime + 0.14) {
       const i = cur.step % cur.len;
       if (i === 0 && cur.step > 0 && tr.loop === false) { stopTrack(); return; }
-      voice(cur.lead, tr.lead ?? 'soft', tr.leadVol ?? 0.09, true);
-      voice(cur.harm, tr.harmInstr ?? 'bell', tr.harmVol ?? 0.04, false);
-      voice(cur.pad, 'pad', tr.padVol ?? 0.035, false);
-      voice(cur.bass, tr.bassInstr ?? 'bass', tr.bassVol ?? 0.13, false);
+      if (i === 0 && opts.sync && !resume) {
+        // top of the loop: where will the clock be when this step sounds?
+        const v = clock();
+        if (v !== null) {
+          const ahead = cur.next - ctx.currentTime;
+          const d = ((((v + ahead + loopLen / 2) % loopLen) + loopLen) % loopLen) - loopLen / 2;
+          if (Math.abs(d) > 0.04) { seek(v); continue; }
+        }
+      }
+      const dyn = tr.dyn ? tr.dyn[Math.floor(i / 16) % tr.dyn.length] : 1;   // per-bar dynamics
+      voice(cur.lead, tr.lead ?? 'soft', (tr.leadVol ?? 0.09) * dyn, true, resume);
+      voice(cur.harm, tr.harmInstr ?? 'bell', (tr.harmVol ?? 0.04) * dyn, false, resume);
+      voice(cur.pad, 'pad', (tr.padVol ?? 0.035) * dyn, false, resume);
+      voice(cur.bass, tr.bassInstr ?? 'bass', (tr.bassVol ?? 0.13) * dyn, false, resume);
+      resume = false;
       const D = cur.drums[i % (cur.drums.length || 1)];
       const dv = tr.drumVol ?? 0.6;
       const at = cur.next - ctx.currentTime;
@@ -385,13 +420,17 @@ function stopTrack() {
   current = null;
 }
 
-/** Switch music (null = silence). Safe to call before audio is unlocked. */
-export function music(name) {
+/**
+ * Switch music (null = silence). Safe to call before audio is unlocked.
+ * opts.sync: lock the track to a looping clock (see startTrack).
+ */
+export function music(name, opts = {}) {
   wantTrack = name;
+  wantOpts = opts;
   if (!ctx) return;
   if (current?.name === name) return;
   if (!name) { stopTrack(); return; }
-  startTrack(name);
+  startTrack(name, opts);
 }
 
 /** Continuous rain bed; level 0..1. */
@@ -423,3 +462,10 @@ export function debugTap() {
 
 /** Name of the track currently wanted (for debug checks). */
 export function currentTrack() { return wantTrack; }
+/** Seconds into the current track's loop (for tests and debugging). */
+export function trackClock() {
+  if (!current || !ctx) return null;
+  const sd = 60 / current.tr.bpm / 4;
+  const len = current.len * sd;
+  return ((((current.step % current.len) * sd - (current.next - ctx.currentTime)) % len) + len) % len;
+}

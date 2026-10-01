@@ -2,7 +2,8 @@
 // Each step is a 16th note. Tokens: note (C5, F#4, Bb3), chord (C4+E4+G4),
 // '.' rest, '-' hold. Drums: k kick, s snare (brushed), h hat, r brush roll.
 // Voices: lead (soft | bell | pluck), harm (a quieter counter-line), pad
-// (chords), bass. `loop: false` plays once. `vol` scales the whole track.
+// (chords), bass. `loop: false` plays once. `vol` scales the whole track;
+// `dyn` (optional) scales the voices bar by bar.
 const bars = (...b) => b.join(' ');
 const hold = (tok, n = 16) => [tok, ...Array(n - 1).fill('-')].join(' ');
 // bar builders (16 steps each)
@@ -14,21 +15,53 @@ const prowl = (lo, hi) => `${lo} - - ${lo} . . ${lo} . ${hi} . ${lo} . . ${lo} $
 const stab = (ch) => `. . ${ch} . . . ${ch} . . . ${ch} . . . ${ch} .`;
 
 export const TRACKS = {
-  // Dreamy, unhurried: a music-box melody over slow chords.
+  // Main menu theme, "First Light": calm with a serious undertow, in D minor.
+  // 14 bars at 75 bpm = 44.8 s, exactly one loop of the title footage, and the
+  // title screen keeps the two in sync, so the music follows the day on
+  // screen: a quiet dawn (1-2), the theme through the day (3-7), a lift over
+  // the overview (8-9), golden hour at the Elite Hall (10-11), dusk turning
+  // to A major (12), a sparse night (13-14) whose A resolves into the dawn of
+  // the next loop.
   title: {
-    bpm: 88, lead: 'bell', leadVol: 0.1,
+    bpm: 75, lead: 'soft', leadVol: 0.075, vol: 0.95,
     lead_: bars(
-      'E5 - - - G5 - - - C6 - - - B5 - G5 -', 'A5 - - - - - G5 - E5 - - - D5 - - -',
-      'F5 - - - A5 - - - C6 - - - B5 - A5 -', 'G5 - - - - - - - - - - - . . . .',
-      'E5 - - - G5 - - - C6 - - - D6 - E6 -', 'D6 - - - - - C6 - A5 - - - G5 - - -',
-      'F5 - - - E5 - - - D5 - - - G5 - - -', 'C5 - - - - - - - - - - - . . . .'),
-    pad: bars(hold('C4+E4+G4'), hold('A3+C4+E4'), hold('F3+A3+C4'), hold('G3+B3+D4'),
-      hold('C4+E4+G4'), hold('F3+A3+D4'), hold('F3+A3+C4', 8) + ' ' + hold('G3+B3+D4', 8), hold('C4+E4+G4')),
-    bass: bars('C3 - - - - - - - G2 - - - - - - -', 'A2 - - - - - - - E2 - - - - - - -',
-      'F2 - - - - - - - C3 - - - - - - -', 'G2 - - - - - - - D3 - - - - - - -',
-      'C3 - - - - - - - G2 - - - - - - -', 'D3 - - - - - - - A2 - - - - - - -',
-      'F2 - - - - - - - G2 - - - - - - -', 'C3 - - - - - - - - - - - - - - -'),
-    drums: 'k . . . . . . . r . . . . . . . '.repeat(8).trim(), drumVol: 0.4,
+      '. . . . . . . . A4 - - - D5 - E5 -', 'F5 - - - - - - - E5 - D5 - - - - -',
+      'C5 - - - F5 - - - A5 - - - G5 - F5 -', 'E5 - - - - - - - G5 - - - - - - -',
+      'F5 - - - E5 - D5 - A5 - - - - - - -', 'D5 - - - - - - - F5 - - - Bb5 - A5 -',
+      'G5 - - - - - - - F5 - - - D5 - - -', 'C5 - - - - - - - F5 - - - A5 - - -',
+      'Bb5 - - - - - - - A5 - - - F5 - G5 -', 'C6 - - - - - - - - - - - G5 - - -',
+      'A5 - - - - - - - G5 - F5 - D5 - - -', 'E5 - - - - - - - C#5 - - - - - - -',
+      'D5 - - - - - - - . . . . A4 - - -', 'F4 - - - - - - - E4 - - - - - - -'),
+    harm: bars(
+      rest(), '. . . . . . . . . . . . A5 . . .',
+      '. . A5 . . . C6 . . . F6 . . . C6 .', '. . G5 . . . C6 . . . E6 . . . C6 .',
+      '. . A5 . . . D6 . . . F6 . . . D6 .', '. . F5 . . . Bb5 . . . D6 . . . Bb5 .',
+      '. . G5 . . . Bb5 . . . D6 . . . F6 .', '. . A5 . . . C6 . . . F6 . . . A6 .',
+      '. . D6 . . . F6 . . . Bb6 . . . F6 .', '. . E6 . . . G6 . . . C7 . . . G6 .',
+      '. . D6 . . . F6 . . . . . . . . .', '. . . . . . . . . . . . E6 . . .',
+      '. . . . . . . . . . . . F5 . . .', rest()),
+    harmInstr: 'bell', harmVol: 0.028,
+    pad: bars(hold('D3+A3+E4+F4'), hold('Bb2+D3+F3+A3'),
+      hold('F3+A3+C4'), hold('C3+E3+G3'), hold('D3+F3+A3'), hold('Bb2+D3+F3'), hold('G2+Bb2+D3+F3'),
+      hold('A2+C3+F3'), hold('Bb2+D3+F3+C4'),
+      hold('C3+E3+G3'), hold('Bb2+D3+F3+A3', 8) + ' ' + hold('G2+Bb2+D3', 8), hold('A2+D3+E3', 8) + ' ' + hold('A2+C#3+E3', 8),
+      hold('D3+F3+A3'), hold('Bb2+D3+F3+A3', 8) + ' ' + hold('A2+C#3+E3+G3', 8)),
+    padVol: 0.042,
+    bass: bars(hold('D2'), hold('Bb1'),
+      hold('F2'), hold('C2'), hold('D2'), hold('Bb1'), hold('G1'),
+      hold('A1'), hold('Bb1'),
+      hold('C2'), hold('Bb1', 8) + ' ' + hold('G1', 8), hold('A1'),
+      hold('D2'), hold('Bb1', 8) + ' ' + hold('A1', 8)),
+    bassVol: 0.1,
+    drums: bars(rest(), '. . . . . . . . . . . . r . . .',
+      ...Array(6).fill('k . . . . . . . . . . . . . . .'),
+      'k . . . . . . . . . . . r . . .',
+      'c . . . . . . . t . . . . . . .', 'k . . . . . . . t . . . . . . .',
+      't . . . . . . . t . . . t . t .',
+      rest(), '. . . . . . . . r . . . . . . .'),
+    drumVol: 0.35,
+    // hushed dawn, the day, swelling to golden hour, settling into the night
+    dyn: [0.7, 0.8, 0.9, 0.9, 0.95, 0.95, 1, 1.05, 1.12, 1.25, 1.15, 1, 0.78, 0.72],
   },
 
   // Daytime route: easy-going walking tempo, warm lead, light brushes.

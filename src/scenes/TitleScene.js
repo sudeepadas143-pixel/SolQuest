@@ -20,7 +20,6 @@ export class TitleScene extends Phaser.Scene {
 
   create() {
     this.cameras.main.fadeIn(900);
-    music('title');
 
     // --- the world: poster frame now, the drone flight as soon as it streams in
     this.add.image(GAME_W / 2, GAME_H / 2, 'title_poster');
@@ -40,6 +39,14 @@ export class TitleScene extends Phaser.Scene {
       },
     });
     this.events.once('shutdown', () => this.flight?.stop());
+    // the theme is written to the footage (one 44.8 s loop each): lock the
+    // music to the video's clock while it plays
+    music('title', {
+      sync: () => {
+        const el = this.flight?.video;
+        return el && !el.paused && el.currentTime > 0 ? el.currentTime : null;
+      },
+    });
 
     // --- screen dressing: shade behind the logo and the prompt, a faint CRT
     const shade = this.add.graphics();

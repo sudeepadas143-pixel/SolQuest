@@ -24,40 +24,47 @@ const lerpV = (a, b, k) => a.clone().lerp(b, k);
 export const glide = (u) => u * 0.75 + (u * u * (3 - 2 * u)) * 0.25;
 const orbit = (cx, cz, r, a, y) => v(cx + Math.cos(a) * r, y, cz + Math.sin(a) * r);
 
-// shots in order; `len` = seconds between this shot's cut-in and the next cut
+// The video plays the edit 1.25x faster: 56 s of edit time -> a 44.8 s loop,
+// exactly 14 bars of the 75 bpm menu theme (src/data/music.js 'title'), which
+// the title screen keeps in sync with the video. Every shot lasts a whole
+// number of half-bars (2 s of edit time = 1.6 s on screen = two beats), so
+// the cuts land on the beat and the music's arc follows the day.
+export const PLAYBACK = 1.25;
+
+// shots in order; `len` = seconds (edit time) between this shot's cut-in and the next cut
 export const SHOTS = [
   { // 1. dawn on the main road, the drone lifts off and climbs over the route
-    name: 'dawn climb', len: 7.5, hour: [6.5, 8.8],
+    name: 'dawn climb', len: 8, hour: [6.5, 8.8],
     pos: (u) => v(22, lerp(2.2, 11, glide(u) ** 1.3), lerp(112, 99, glide(u))),
     target: (u) => v(23, lerp(1.4, 0, u), lerp(100, 72, u)), ty: (u) => lerp(0.05, -0.12, u),
   },
   { // 2. late morning: a slow arc around the fountain and the gazebo
-    name: 'square', len: 6.5, hour: [10.4, 11.2], tilt: 2.2,
+    name: 'square', len: 6, hour: [10.4, 11.2], tilt: 2.2,
     pos: (u) => orbit(55.2, 107.4, 8.2, lerp(1.95, 1.2, glide(u)), lerp(3.6, 4.2, u)),
     target: () => v(55.2, 0.6, 107.4), ty: () => -0.1,
   },
   { // 3. midday: skimming the pond out along the pier
-    name: 'pier', len: 7, hour: [12.8, 13.4],
+    name: 'pier', len: 8, hour: [12.8, 13.4],
     pos: (u) => v(56.95, lerp(1.1, 1.7, u), lerp(93.8, 82.5, glide(u))),
     target: (u) => v(lerp(56.6, 55, u), 0.2, lerp(88, 72, u)), ty: () => -0.18,
   },
   { // 4. afternoon: low through the grass towards the windmill
-    name: 'windmill', len: 6.5, hour: [15.2, 15.8],
+    name: 'windmill', len: 6, hour: [15.2, 15.8],
     pos: (u) => v(lerp(53.5, 50.2, glide(u)), lerp(0.85, 1.6, u), lerp(75.5, 71.2, glide(u))),
     target: () => v(46, 2.1, 66.2), ty: () => 0.06,
   },
   { // 5. rising high over the middle of the route: the whole world, north to the Hall
-    name: 'overview', len: 7, hour: [15.9, 16.6],
+    name: 'overview', len: 8, hour: [15.9, 16.6],
     pos: (u) => v(lerp(40, 36, glide(u)), lerp(9, 17, glide(u)), lerp(64, 74, glide(u))),
     target: (u) => v(lerp(30, 26, u), 0, lerp(34, 28, u)), ty: () => 0.02,
   },
   { // 6. golden hour: up the approach to the Elite Hall
-    name: 'approach', len: 7, hour: [18.0, 18.5],
+    name: 'approach', len: 6, hour: [18.0, 18.5],
     pos: (u) => v(lerp(20.6, 23.6, u), lerp(1.9, 2.9, u), lerp(33, 21.5, glide(u))),
     target: (u) => v(22.5, 2.6, lerp(12, 10, u)), ty: () => 0.1,
   },
   { // 7. dusk: arcing up round the Hall against the last of the sunset
-    name: 'hall dusk', len: 6.5, hour: [19.0, 19.7],
+    name: 'hall dusk', len: 6, hour: [19.0, 19.7],
     pos: (u) => orbit(22.5, 9.5, lerp(19, 22, u), lerp(1.2, 0.6, glide(u)), lerp(3.0, 8.5, glide(u))),
     target: () => v(22.5, 2.4, 9.5), ty: () => 0.0,
   },

@@ -16,7 +16,7 @@
       frame: (t) => { d.renderAt(t); return document.getElementById('c').toDataURL('image/png'); } };
     // live preview when opened in a browser: ?play
     if (new URLSearchParams(location.search).has('play')) {
-      window.__drone.ready.then(() => { const t0 = performance.now(); const f = () => { d.renderAt((performance.now() - t0) / 1000); requestAnimationFrame(f); }; f(); });
+      window.__drone.ready.then(() => { const t0 = performance.now(); const f = () => { d.renderAt(((performance.now() - t0) / 1000) * edit.PLAYBACK); requestAnimationFrame(f); }; f(); });
     }
   </script>
 </body>

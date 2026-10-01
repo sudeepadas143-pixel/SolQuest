@@ -13,10 +13,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { ROOT, server, ffmpegPath } from './common.mjs';
-import { LOOP } from '../src/drone/edit.js';
+import { LOOP, PLAYBACK } from '../src/drone/edit.js';
 
 const FPS = 30;
-const N = LOOP * FPS;
+const N = Math.round((LOOP / PLAYBACK) * FPS);   // frames in the video loop (frame i shows edit time i * PLAYBACK / FPS)
 const OUT = path.resolve(ROOT, '..', 'public', 'assets', 'title');
 const FRAMES = path.join(ROOT, 'out', 'drone-frames');
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
@@ -27,14 +27,29 @@ async function worker(from, to) {
   const browser = await chromium.launch({ executablePath: exe, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const page = await browser.newPage({ viewport: { width: 960, height: 640 } });
   page.on('pageerror', (e) => console.error('page error:', e.message));
-  await page.goto('http://127.0.0.1:5174/drone.html');
-  await page.waitForFunction(() => window.__drone, null, { timeout: 60000 });
-  await page.evaluate(() => window.__drone.ready);
+  const open = async () => {
+    await page.goto('http://127.0.0.1:5174/drone.html');
+    await page.waitForFunction(() => window.__drone, null, { timeout: 60000 });
+    await page.evaluate(() => window.__drone.ready);
+  };
+  // a dev-server reload (a file changed) destroys the page: reopen and retry
+  const frame = async (t) => {
+    for (let k = 0; ; k++) {
+      try {
+        return await page.evaluate((t) => window.__drone.frame(t), t);
+      } catch (e) {
+        if (k >= 3) throw e;
+        console.log(`[${from}-${to}] page reloaded (${e.message.split('\n')[0]}), reopening`);
+        await open();
+      }
+    }
+  };
+  await open();
   const t0 = Date.now();
   let done = 0;
   for (let i = from; i < to; i++) {
     if (existsSync(frameFile(i))) continue;
-    const url = await page.evaluate((t) => window.__drone.frame(t), i / FPS);
+    const url = await frame((i * PLAYBACK) / FPS);
     writeFileSync(frameFile(i), Buffer.from(url.split(',')[1], 'base64'));
     done++;
     if (done % 30 === 0) console.log(`[${from}-${to}] frame ${i + 1}  ${((Date.now() - t0) / done / 1000).toFixed(2)} s/frame`);
