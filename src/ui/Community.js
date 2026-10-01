@@ -38,6 +38,24 @@ export async function copyText(str) {
   }
 }
 
+/** An invisible real-DOM hotspot over part of the canvas: an <a href> for a
+ *  link, a <button> otherwise. Browsers (Safari and phones especially) only
+ *  open new tabs and write the clipboard from a genuine click on a page
+ *  element - not from the game's own tap handling - so links and copy buttons
+ *  get one of these on top. Returns the DOMElement (hide it with setVisible). */
+export function domHotspot(scene, x, y, w, h, { href = null, onClick = null, label = '' } = {}) {
+  const el = document.createElement(href ? 'a' : 'button');
+  if (href) {
+    el.href = href;
+    el.target = '_blank';
+    el.rel = 'noopener noreferrer';
+  } else el.type = 'button';
+  el.setAttribute('aria-label', label);
+  el.style.cssText = `display:block;width:${w}px;height:${h}px;margin:0;padding:0;border:0;background:transparent;cursor:pointer;-webkit-tap-highlight-color:transparent;outline:none`;
+  if (onClick) el.addEventListener('click', (e) => { if (!href) e.preventDefault(); onClick(e); });
+  return scene.add.dom(x, y, el).setOrigin(0);
+}
+
 /** A brief "Copied!" note floating up from (x, y). */
 function toast(scene, x, y, msg, color = '#2ef2a8', depth = 2000) {
   const t = text(scene, x, y, msg, 18, color, { fontStyle: 'bold' }).setOrigin(0.5).setDepth(depth);
@@ -59,18 +77,26 @@ export function followX(scene, x, y, depth) {
 /** The always-on strip at the bottom-left of the title screen: [X] and [CA ⧉]. */
 export function communityStrip(scene, { x = 16, y = GAME_H - 46, depth = 50 } = {}) {
   const c = scene.add.container(0, 0).setDepth(depth);
-  const chip = (cx, w, label, color, onTap) => {
+  const hotspots = [];
+  const chip = (cx, w, label, color, hot) => {
     c.add(panel(scene, cx, y, w, 34, 'chip'));
     const t = text(scene, cx + w / 2, y + 17, label, 17, color, { fontStyle: 'bold' }).setOrigin(0.5);
-    const z = scene.add.zone(cx, y, w, 34).setOrigin(0).setInteractive({ useHandCursor: true });
-    z.on('pointerover', () => t.setAlpha(0.75)).on('pointerout', () => t.setAlpha(1));
-    z.on('pointerdown', () => onTap(cx + w / 2, y - 8));
-    c.add([t, z]);
+    c.add(t);
+    const d = domHotspot(scene, cx, y, w, 34, hot);
+    d.node.addEventListener('pointerenter', () => t.setAlpha(0.75));
+    d.node.addEventListener('pointerleave', () => t.setAlpha(1));
+    hotspots.push(d);
     return cx + w + 8;
   };
-  let nx = chip(x, 112, X_URL ? 'X  FOLLOW' : 'X  SOON', '#fff7e6', (tx, ty) => followX(scene, tx, ty, depth + 1));
+  let nx = chip(x, 112, X_URL ? 'X  FOLLOW' : 'X  SOON', '#fff7e6', X_URL
+    ? { href: X_URL, label: 'SolQuest on X', onClick: () => sfx('confirm') }
+    : { label: 'X coming soon', onClick: () => followX(scene, x + 56, y - 8, depth + 1) });
   const ca = CONTRACT_ADDRESS ? `CA ${shortCA(CONTRACT_ADDRESS)}  COPY` : 'CA  COMING SOON';
-  nx = chip(nx, CONTRACT_ADDRESS ? 250 : 190, ca, '#2ef2a8', (tx, ty) => copyCA(scene, tx, ty, depth + 1));
+  const caW = CONTRACT_ADDRESS ? 250 : 190;
+  const caX = nx;
+  nx = chip(nx, caW, ca, '#2ef2a8', { label: 'Copy the contract address', onClick: () => copyCA(scene, caX + caW / 2, y - 8, depth + 1) });
+  // page elements sit above the canvas: hide them while a board or panel covers the strip
+  c.setLinksActive = (on) => hotspots.forEach((d) => d.setVisible(on));
   return c;
 }
 
@@ -106,8 +132,13 @@ export function openCommunity(scene, { depth = 1500 } = {}) {
       add(text(scene, x0 + 48, r.y - 4, r.value, long ? 15 : 24, r.action ? '#fff7e6' : '#7a7ea0', { fontStyle: 'bold' }));
       if (r.action) {
         const bx = x0 + W - 92;
-        r.btn = tapButton(scene, bx, r.y - 6, r.action, () => { sel = i; draw(); r.run(bx, r.y - 40); }, { w: 104, h: 40, size: 20, depth: depth + 2, style: 'chip', color: '#2ef2a8' });
+        r.btn = tapButton(scene, bx, r.y - 6, r.action, () => {}, { w: 104, h: 40, size: 20, depth: depth + 2, style: 'chip', color: '#2ef2a8' });
         objs.push(r.btn);
+        // the real click target (see domHotspot)
+        const pop = () => { sel = i; draw(); scene.tweens.add({ targets: r.btn, scale: 0.94, duration: 70, yoyo: true }); };
+        objs.push(domHotspot(scene, bx - 56, r.y - 30, 112, 48, i === 0
+          ? { href: X_URL, label: 'SolQuest on X', onClick: () => { pop(); sfx('confirm'); } }
+          : { label: 'Copy the contract address', onClick: () => { pop(); r.run(bx, r.y - 40); } }));
       }
       add(scene.add.zone(x0 + 22, r.y - 44, W - 160, 84).setOrigin(0).setInteractive())
         .on('pointerover', () => { sel = i; draw(); });

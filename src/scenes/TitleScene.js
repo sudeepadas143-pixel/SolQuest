@@ -86,7 +86,7 @@ export class TitleScene extends Phaser.Scene {
     } });
     text(this, GAME_W - 16, GAME_H - 22, 'N: sound on/off', 14, '#fff7e6').setOrigin(1, 0).setAlpha(0.6);
     // X and the contract address, always one click away
-    communityStrip(this);
+    this.strip = communityStrip(this);
 
     let started = false;
     const go = () => {
@@ -115,6 +115,7 @@ export class TitleScene extends Phaser.Scene {
     this.menuIndex = i;
     if (choice === 'SETTINGS') { await openSettings(this); this.openMenu(); return; }
     if (choice === 'COMMUNITY') { await openCommunity(this); this.openMenu(); return; }
+    this.strip.setLinksActive(false);   // nothing else on the title should take clicks now
     if (choice === 'LEADERBOARD' || choice === 'EARNINGS') {
       // the boards open over the title (the footage keeps playing behind)
       const key = choice === 'LEADERBOARD' ? 'Leaderboard' : 'Earnings';
@@ -122,6 +123,7 @@ export class TitleScene extends Phaser.Scene {
       this.scene.launch(key, { from: 'Title' });
       this.scene.get(key).events.once('shutdown', () => {
         this.input.enabled = true;
+        this.strip.setLinksActive(true);
         this.openMenu();
       });
       return;

@@ -11,7 +11,7 @@ import { sfx } from '../systems/audio.js';
 import { panel, text } from '../ui/theme.js';
 import { domInput, tapButton } from '../ui/helpers.js';
 import { validWallet } from './WalletScene.js';
-import { openUrl } from '../ui/Community.js';
+import { domHotspot } from '../ui/Community.js';
 import { fmtSol } from './LeaderboardScene.js';
 
 const day = (iso) => new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -116,9 +116,9 @@ export class EarningsScene extends Phaser.Scene {
         B.add(text(this, 330, y, `${day(p.at)}  ${p.season.toUpperCase()} ${place}`, 17, '#fff7e6'));
         B.add(text(this, 640, y, fmtSol(p.amountSol), 18, '#ffc94a', { fontStyle: 'bold' }).setOrigin(1, 0));
         if (p.tx) {
-          const link = text(this, 660, y, `tx ${p.tx.slice(0, 6)}… ↗`, 16, '#5ccaff').setInteractive({ useHandCursor: true });
-          link.on('pointerdown', () => { sfx('confirm'); openUrl(`https://solscan.io/tx/${p.tx}`); });
-          B.add(link);
+          const link = text(this, 660, y, `tx ${p.tx.slice(0, 6)}… ↗`, 16, '#5ccaff');
+          // a real link on top, so every browser opens it (see domHotspot)
+          B.add([link, domHotspot(this, 656, y - 4, link.width + 10, 26, { href: `https://solscan.io/tx/${p.tx}`, label: 'View the payout on Solscan', onClick: () => sfx('confirm') })]);
         } else B.add(text(this, 660, y, 'recorded', 16, '#7a7ea0'));
       });
       if (res.payouts.length > shown.length) B.add(text(this, 330, 350 + 5 * 34, `+${res.payouts.length - shown.length} earlier`, 16, '#8f93c4'));
