@@ -127,7 +127,7 @@ export const captions = [
   { t0: T(12, 1, 2), t1: T(13), text: 'top 3 get paid. every day.', size: 100, gold: true },
   { t0: HALL0 + S16 * 2, t1: REVEAL0, text: 'one waits at the top.', size: 104 },
   { t0: T(16, 3), t1: T(17, 2), text: 'win creator fees daily.', size: 92, y: 760, gold: true },
-  { t0: T(17, 2), t1: DURATION, text: 'coming soon', size: 92, y: 760, noOut: true },
+  { t0: T(17, 2), t1: DURATION, text: 'now live', size: 92, y: 760, noOut: true },
 ];
 export const HANDLE = { t0: T(17, 2), text: '@SolQuestOnSol' };
 
