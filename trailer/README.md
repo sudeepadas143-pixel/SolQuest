@@ -98,7 +98,7 @@ overworld, rendered as a 3D world from the game's own data:
 ```bash
 python3 drone/export_props.py     # the game's prop models (tools/props3d.py) -> textured 3D meshes (drone/assets/props)
 npm run dev                        # then open http://127.0.0.1:5174/drone.html?play for a live preview
-node render/drone.mjs --crf 28     # 56 s loop, 4 workers, resumable -> ../public/assets/title/drone.{mp4,webm} + poster.jpg
+node render/drone.mjs --crf 28     # 44.8 s loop (the 56 s edit at 1.25x), 4 workers, resumable -> ../public/assets/title/drone.{mp4,webm} + poster.jpg
 ```
 
 - **Models** (`drone/export_props.py`):
@@ -138,6 +138,14 @@ node render/drone.mjs --crf 28     # 56 s loop, 4 workers, resumable -> ../publi
     the whip-pan motion blur, the focus racks, the tilt-shift and a soft grade
     (cool shadows, warm highlights, vignette). Nothing flashes: the brightest
     moment is the light leak's gentle warm sweep.
+  - The video plays the edit at 1.25x (`PLAYBACK`): a 44.8 s loop, exactly 14
+    bars of the menu theme (`title` in `src/data/music.js`, 75 bpm). The title
+    screen locks the music to the video's clock (`music('title', { sync })`),
+    so the theme's arc follows the day: a hushed dawn, golden hour at the
+    peak, the turn to A major at dusk, a sparse night.
+  - The shipped video is the 1x render sped up with ffmpeg
+    (`setpts=PTS/1.25,framerate=fps=30`, blending neighbouring frames); a
+    fresh `node render/drone.mjs` renders the same loop natively at 1.25x.
   - Each shot runs on its own clock (clouds, water, grass), and the last
     transition ends exactly on t = 0, so the loop is seamless and frame 0 (the
     poster) is a clean frame.
