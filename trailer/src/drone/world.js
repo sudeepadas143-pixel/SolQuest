@@ -166,7 +166,7 @@ export async function buildWorld(scene) {
     if (p.x >= OUTDOOR_W - 1 && !p.border) continue;                   // the Hall's interior sits east of the route
     if (!index[p.type]) continue;
     const { g } = await loadModel(p.type, index);
-    add(p.type, placed(g, p.x, p.y));
+    add(`${p.type}|${Math.floor(p.x / 16)}|${Math.floor(p.y / 16)}`, placed(g, p.x, p.y));   // in 16-tile blocks, culled when out of view
   }
   // tall grass (back + front halves) on every encounter tile, clumps on open grass
   const grassSets = new Map();
@@ -188,7 +188,7 @@ export async function buildWorld(scene) {
     scene.add(mesh);
   }
 
-  // ---- beyond the route: rolling meadow, a deep forest, far hills
+  // ---- beyond the route: rolling meadow, a deep forest
   const mtex = crispTexture(new THREE.CanvasTexture(tileCanvas('grass')), true);
   const outerGeo = new THREE.PlaneGeometry(900, 900, 90, 90).rotateX(-Math.PI / 2);
   const ouv = outerGeo.attributes.uv;
@@ -197,22 +197,34 @@ export async function buildWorld(scene) {
   outer.position.set(OUTDOOR_W / 2, -0.12, MAP_H / 2);
   outer.receiveShadow = true;
   scene.add(outer);
+  // The forest is most of the scene's triangles, so it is merged in 16-tile
+  // blocks (the camera and the shadow map skip blocks out of view) and trees
+  // more than 4 tiles out use the low-poly crowns.
   const kinds = ['tree', 'tree2', 'tree', 'tree3', 'tree2', 'tree'];
+  const forest = new Map();
   for (let z = -40; z < MAP_H + 40; z += 2) {
     for (let x = -40; x < OUTDOOR_W + 40; x += 2) {
       const inside = x >= -1 && x < OUTDOOR_W + 1 && z >= -1 && z < MAP_H + 1;
       if (inside) continue;
       const d = Math.max(-x, x - OUTDOOR_W, -z, z - MAP_H);          // distance out from the route
       if (rnd(x, z, 1) > 0.9 - Math.min(0.5, d * 0.02)) continue;
-      const k = kinds[hash(x, z) % kinds.length];
+      const k = kinds[hash(x, z) % kinds.length] + (d > 4 ? '_lo' : '');
       const { g } = await loadModel(k, index);
       const jx = x + rnd(x, z, 2) * 1.2 - 0.6;
       const jz = z + rnd(x, z, 3) * 1.2 - 0.6;
-      add(k, placed(g, jx, jz, 0, 0.9 + rnd(x, z, 4) * 0.5));
+      const key = `${k}|${Math.floor(x / 16)}|${Math.floor(z / 16)}`;
+      if (!forest.has(key)) forest.set(key, []);
+      forest.get(key).push(placed(g, jx, jz, 0, 0.9 + rnd(x, z, 4) * 0.5));
     }
   }
-  for (const [name, list] of byModel) {
-    const m = new THREE.Mesh(mergeGeometries(list), modelMaterial(MODEL_CACHE.get(name).tex));
+  for (const [key, list] of forest) {
+    const m = new THREE.Mesh(mergeGeometries(list), modelMaterial(MODEL_CACHE.get(key.split('|')[0]).tex));
+    m.castShadow = true;
+    m.receiveShadow = true;
+    scene.add(m);
+  }
+  for (const [key, list] of byModel) {
+    const m = new THREE.Mesh(mergeGeometries(list), modelMaterial(MODEL_CACHE.get(key.split('|')[0]).tex));
     m.castShadow = true;
     m.receiveShadow = true;
     scene.add(m);

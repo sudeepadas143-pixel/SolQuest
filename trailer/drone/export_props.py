@@ -32,6 +32,7 @@ import props3d as P        # noqa: E402
 RES = 4                    # texels per world unit (= the game sprites' density)
 PAD = 2                    # texels of bleed around every face (seams, mipmaps)
 OUT = os.path.join(HERE, 'assets', 'props')
+ELL = (12, 20)             # ellipsoid tessellation (rings, segments); the far-forest trees use fewer
 
 
 def ellipsoid_tris(cen, rad, nl=12, nm=20):
@@ -65,7 +66,7 @@ def faces(model):
             o, u, v = frame
         out.append((P0, P1, P2, sh, o, u, v, n, False))
     for cen, rad, sh in model.ells:
-        for a, b, cc in ellipsoid_tris(cen, rad):
+        for a, b, cc in ellipsoid_tris(cen, rad, *ELL):
             a, b, cc = (np.asarray(p, float) for p in (a, b, cc))
             n = I.norm(np.cross(b - a, cc - a))
             if not np.isfinite(n).all():
@@ -155,19 +156,29 @@ def builders():
             b[f'tall_{layer}{v}'] = (lambda v=v, layer=layer: P.tall_grass(v, layer, 1))
     for v in range(3):
         b[f'clump{v}'] = (lambda v=v: P.grass_clump(v))
+    # low-poly trees for the forest far beyond the route (same art, rounder
+    # crowns drawn with fewer facets)
+    for name, k in (('tree_lo', 0), ('tree2_lo', 1), ('tree3_lo', 2)):
+        b[name] = (lambda k=k: P.tree(k))
     return b
 
 
 def main():
+    global ELL
     os.makedirs(OUT, exist_ok=True)
-    for f in os.listdir(OUT):
-        os.remove(os.path.join(OUT, f))
-    I.Model.render = lambda self, *a, **k: self          # capture instead of rasterising
+    only = set(sys.argv[1:])            # names given: re-export just those, keep the rest
     index = {}
-    only = set(sys.argv[1:])
+    if only and os.path.exists(os.path.join(OUT, 'index.json')):
+        with open(os.path.join(OUT, 'index.json')) as f:
+            index = json.load(f)
+    else:
+        for f in os.listdir(OUT):
+            os.remove(os.path.join(OUT, f))
+    I.Model.render = lambda self, *a, **k: self          # capture instead of rasterising
     for name, fn in builders().items():
         if only and name not in only:
             continue
+        ELL = (7, 10) if name.endswith('_lo') else (12, 20)
         m = fn()
         pos, uv, img = bake(m)
         with open(os.path.join(OUT, f'{name}.bin'), 'wb') as f:
