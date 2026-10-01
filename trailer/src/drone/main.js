@@ -14,6 +14,7 @@ THREE.ColorManagement.enabled = false;
 export { LOOP };
 export const OUT = { w: 960, h: 640 };
 const FOV = 46;
+const SHIFT = -0.18;                          // fixed vertical lens shift (NDC), the same for every shot
 
 // ------------------------------------------------------------ time of day
 // palette per hour: sky top, horizon, sun colour, sun strength, ambient sky, ambient ground, ambient strength
@@ -152,20 +153,23 @@ export class Drone {
     U.uTime.value = V.clock;
     U.uNight.value = night;
 
-    // Camera: yaw towards the target, never pitch or roll. A vertical lens
-    // shift places the target at screen height V.ty instead, so walls,
-    // columns and trees stay upright.
+    // Camera: yaw and a gentle pitch towards the target, never roll, and a
+    // small fixed lens shift. Most of the downward look is real pitch (kept
+    // under ~25 degrees, so walls and columns stay visually upright); a lens
+    // shift that varies, or a big one, stretches whatever nears the bottom of
+    // the frame and makes the world look like it floats.
     const cam = this.camera;
-    const d = new THREE.Vector3(V.target.x - V.pos.x, 0, V.target.z - V.pos.z);
-    const dist = Math.max(0.5, d.length());
-    const yaw = Math.atan2(d.x, d.z) + V.yaw;
-    cam.position.copy(V.pos);
-    cam.up.set(0, 1, 0);
-    cam.lookAt(V.pos.x + Math.sin(yaw), V.pos.y, V.pos.z + Math.cos(yaw));
+    const dist = Math.max(0.5, Math.hypot(V.target.x - V.pos.x, V.target.z - V.pos.z));
+    const yaw = Math.atan2(V.target.x - V.pos.x, V.target.z - V.pos.z) + V.yaw;
     cam.fov = FOV;
     cam.updateProjectionMatrix();
     const f = cam.projectionMatrix.elements[5];
-    cam.projectionMatrix.elements[9] = Math.min(0.4, Math.max(-0.8, (f * (V.target.y - V.pos.y)) / dist - V.ty));
+    const toTarget = Math.atan2(V.target.y - V.pos.y, dist);
+    const pitch = toTarget - Math.atan((V.ty + SHIFT) / f);
+    cam.position.copy(V.pos);
+    cam.up.set(0, 1, 0);
+    cam.lookAt(V.pos.x + Math.sin(yaw) * Math.cos(pitch), V.pos.y + Math.sin(pitch), V.pos.z + Math.cos(yaw) * Math.cos(pitch));
+    cam.projectionMatrix.elements[9] = SHIFT;
     cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
 
     // sun (or moon) across the sky; the shadow map covers the ground between
