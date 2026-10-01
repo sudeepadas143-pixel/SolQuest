@@ -2,6 +2,7 @@ import { panelTexture } from './skin.js';
 import { FONT } from '../config.js';
 import { chooseFrom } from './Menu.js';
 import { PANEL } from './theme.js';
+import { pushFocus } from '../systems/controls.js';
 
 export function fadeTo(scene, key, data, ms = 350) {
   scene.cameras.main.fadeOut(ms, 0, 0, 0);
@@ -51,4 +52,24 @@ export function tapButton(scene, cx, cy, label, onTap, { w = 220, h = 56, style 
     onTap();
   });
   return c;
+}
+
+/** Wait for "continue": ENTER / A / B, or a click / tap anywhere. Resolves once.
+ *  ready(): optional gate (e.g. ignore mashing for the first moments). */
+export function waitContinue(scene, { ready = () => true } = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    let release = () => {};
+    const finish = () => {
+      if (done || !ready()) return;
+      done = true;
+      release();
+      scene.input.off('pointerdown', finish);
+      resolve();
+    };
+    release = pushFocus((a) => { if (a === 'confirm' || a === 'cancel') finish(); }, scene);
+    // next tick, so the click that led here doesn't count
+    scene.time.delayedCall(0, () => { if (!done) scene.input.on('pointerdown', finish); });
+    scene.events.once('shutdown', () => scene.input.off('pointerdown', finish));
+  });
 }

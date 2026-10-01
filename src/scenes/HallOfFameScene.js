@@ -8,12 +8,11 @@ import { calcStats } from '../systems/creature.js';
 import { getSave } from '../systems/save.js';
 import { trainerName } from '../systems/teams.js';
 import { maxScore } from '../systems/score.js';
-import { pushFocus } from '../systems/controls.js';
 import { panel, text, COLORS } from '../ui/theme.js';
 import { formatRun } from '../systems/world.js';
 import { music, sfx } from '../systems/audio.js';
 import { typeBadge } from '../ui/Summary.js';
-import { fadeTo } from '../ui/helpers.js';
+import { fadeTo, waitContinue } from '../ui/helpers.js';
 
 export class HallOfFameScene extends Phaser.Scene {
   constructor() { super('HallOfFame'); }
@@ -100,17 +99,12 @@ export class HallOfFameScene extends Phaser.Scene {
       },
     });
 
-    const hint = text(this, GAME_W / 2, GAME_H - 34, 'ENTER: return to the route', 20, '#fff7e6', { stroke: '#12163a', strokeThickness: 5 }).setOrigin(0.5).setDepth(60);
+    const hint = text(this, GAME_W / 2, GAME_H - 34, 'Click or press ENTER to return to the route', 20, '#fff7e6', { stroke: '#12163a', strokeThickness: 5 }).setOrigin(0.5).setDepth(60);
     this.tweens.add({ targets: hint, alpha: 0.3, duration: 800, yoyo: true, repeat: -1 });
     // don't let a held or mashed key skip the moment (a delayed flag: the
     // scene clock still reads 0 during create, so a timestamp can't be used)
     let ready = false;
     this.time.delayedCall(2500, () => { ready = true; });
-    const release = pushFocus((a) => {
-      if (a !== 'confirm' && a !== 'cancel') return;
-      if (!ready) return;
-      release();
-      fadeTo(this, 'Overworld', {}, 600);
-    }, this);
+    waitContinue(this, { ready: () => ready }).then(() => fadeTo(this, 'Overworld', {}, 600));
   }
 }

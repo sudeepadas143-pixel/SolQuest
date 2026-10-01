@@ -39,7 +39,7 @@ import { HpBar } from '../ui/HpBar.js';
 import { showSummary } from '../ui/Summary.js';
 import { panel, text, COLORS, hex } from '../ui/theme.js';
 import { buttonTexture, panelTexture, C } from '../ui/skin.js';
-import { wait, tween, yesNo } from '../ui/helpers.js';
+import { wait, tween, yesNo, waitContinue } from '../ui/helpers.js';
 
 const FOE_PLAT = { x: 715, y: 262 };
 const ME_PLAT = { x: 235, y: 462 };
@@ -770,10 +770,9 @@ export class BattleScene extends Phaser.Scene {
     objs.forEach((o) => o.destroy());
   }
 
-  waitConfirm() {
-    return new Promise((resolve) => {
-      const release = pushFocus((a) => { if (a === 'confirm' || a === 'cancel') { release(); sfx('tick'); resolve(); } }, this);
-    });
+  async waitConfirm() {
+    await waitContinue(this);
+    sfx('tick');
   }
 
   async learn(moveId) {

@@ -35,7 +35,12 @@ export class StarterScene extends Phaser.Scene {
       badge.fillStyle(0x000000, 0.25).fillRoundedRect(cx - 48, 364, 100, 26, 9);
       badge.fillStyle(TYPE_COLORS[sp.types[0]], 1).fillRoundedRect(cx - 50, 362, 100, 26, 9);
       const bt = text(this, cx, 363, sp.types[0].toUpperCase(), 18, '#ffffff').setOrigin(0.5, 0);
-      img.setInteractive({ useHandCursor: true }).on('pointerdown', () => { this.index = i; this.draw(); this.confirm(); });
+      // the whole card: hover highlights it, click picks it
+      for (const t of [card, img]) {
+        t.setInteractive({ useHandCursor: true })
+          .on('pointerover', () => { if (this.busy || this.index === i) return; this.index = i; sfx('cursor'); this.draw(); })
+          .on('pointerdown', () => { if (this.busy) return; this.index = i; this.draw(); this.confirm(); });
+      }
       return { id, cx, card, glow, img, name, badge, bt };
     });
     this.index = 0;

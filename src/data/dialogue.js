@@ -1,23 +1,19 @@
 // Intro script - rendered on a pure black overlay, white text, no portrait.
 // Each entry is one "page" (press to continue). {PLAYER_NAME} is substituted.
 // { input: 'name' } marks where the name entry appears.
-export const INTRO_SPEAKER = 'PROFESSOR SATOSHI';
+export const INTRO_SPEAKER = 'PROFESSOR MIA';
 
+// Short on purpose: the run clock is waiting.
 export const INTRO_SCRIPT = [
-  '...',
-  "Oh. You're up.",
-  "Don't turn around. Nobody sees my face, and I'd like to keep it that way.",
-  'One road runs out of this town. Five Elites stand on it.',
-  "Four of them are spread along the route. The fifth, Cooker, holds the Elite Hall at the very end. Nobody has beaten Cooker yet.",
-  'Clear all five and you make the board. The fastest runs get paid out of the creator fees, straight to your wallet.',
-  "Your clock starts on your first step, so I'll keep this short.",
-  'What do people call you?',
+  "Oh, hi! You must be the new Trainer. I'm Professor Mia.",
+  "Five Elites stand on the road out of town. Beat four on the route, and the fifth waits for you in the Elite Hall.",
+  'The fastest clears earn a share of the creator fees, paid straight to your wallet. Your clock starts on your first step.',
+  'So, what should I call you?',
   { input: 'name' },
-  '{PLAYER_NAME}. Good. Easy to remember if it ends up at the top of the board.',
-  "Go on. That road won't clear itself.",
+  "{PLAYER_NAME}! Love it. Now let's get a good look at you.",
 ];
 
-export const WALLET_PROMPT = 'Paste your wallet address — this is where your airdrop will be sent if you qualify';
+export const WALLET_PROMPT = 'Paste your wallet address. If your clear qualifies, this is where your payout is sent.';
 
 export const LOOK_PROMPT = 'Which Trainer are you?';
 export const STARTER_PROMPT = 'Choose your partner. This choice is final.';

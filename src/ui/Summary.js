@@ -66,7 +66,7 @@ export function showSummary(scene, c, { depth = 1500 } = {}) {
     add(text(scene, 880, y, `PP ${m.pp}/${mv.pp}`, 22, '#5b5f70').setOrigin(1, 0));
     add(text(scene, 504, y + 28, mv.category === 'status' ? 'Status' : `${mv.category === 'physical' ? 'Physical' : 'Special'} · Pow ${mv.power}`, 16, '#8a8ea0'));
   });
-  add(text(scene, 880, 580, 'ENTER / ESC: close', 18, '#8a8ea0').setOrigin(1, 0));
+  add(text(scene, 880, 580, 'Click or press ESC to close', 18, '#8a8ea0').setOrigin(1, 0));
 
   return new Promise((resolve) => {
     const close = () => { release(); scene.input.off('pointerdown', close); objs.forEach((o) => o.destroy()); resolve(); };

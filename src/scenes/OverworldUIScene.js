@@ -16,9 +16,22 @@ import { showSummary } from '../ui/Summary.js';
 import { panel, text } from '../ui/theme.js';
 import { iconTexture, badgeTexture, C } from '../ui/skin.js';
 import { domInput, yesNo, tapButton } from '../ui/helpers.js';
-import { pushFocus } from '../systems/controls.js';
+import { pushFocus, press } from '../systems/controls.js';
+import { HINT_IDS, isLearned, allLearned, onLearned, learnAll } from '../systems/hints.js';
+
+// phones / tablets have the on-screen pad (with its own MENU button)
+const TOUCH = window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window;
+// the PC controls legend: [key, what it does]
+const LEGEND = {
+  move: ['WASD', 'Move'],
+  run: ['SHIFT', 'Run (hold)'],
+  use: ['ENTER', 'Talk / use'],
+  menu: ['M', 'Menu'],
+  click: ['CLICK', 'Walk there / use it'],
+};
 import { runEvolution } from './EvolutionScene.js';
 import { validWallet } from './WalletScene.js';
+import { WALLET_PROMPT } from '../data/dialogue.js';
 
 export class OverworldUIScene extends Phaser.Scene {
   constructor() { super('OverworldUI'); }
@@ -55,8 +68,8 @@ export class OverworldUIScene extends Phaser.Scene {
     this.badges = [];
     this.scoreText = text(this, rx + 236, 134, '', 18, '#ffc94a').setOrigin(1, 0).setDepth(900);
 
-    this.hint = text(this, GAME_W - 20, GAME_H - 30, 'M menu · hold X or SHIFT to run · N sound', 16, '#fff7e6').setOrigin(1, 0).setAlpha(0.85).setDepth(900);
-    this.tweens.add({ targets: this.hint, alpha: 0, delay: 9000, duration: 1200 });
+    this.buildLegend();
+    this.buildMenuButton();
 
     this.banner = this.add.container(0, -90).setDepth(1500);
     this.toast = this.add.container(0, 0).setDepth(1500);
@@ -72,6 +85,8 @@ export class OverworldUIScene extends Phaser.Scene {
   update() {
     const s = getSave();
     if (!s) return;
+    // ten minutes in, the controls are known either way
+    if (this.legend && s.stats.playMs > 10 * 60 * 1000 && !allLearned()) learnAll();
     const ck = clock(s.stats.playMs);
     this.clockText.setText(`${formatClock(s.stats.playMs)}  ·  Day ${ck.day}`);
     const night = isNight(s.stats.playMs);
@@ -109,9 +124,87 @@ export class OverworldUIScene extends Phaser.Scene {
   async say(lines, { speaker = null, banner = null, portrait = null } = {}) {
     const arr = Array.isArray(lines) ? lines : [lines];
     if (banner) this.showToast(banner, true);
+    this.chrome(false);
     for (const l of arr) await this.box.say(l, { speaker, portrait });
     this.box.setVisible(false);
     this.box.clear();
+    this.chrome(true);
+  }
+
+  /** The bottom-corner bits (legend, MENU button) step aside for the dialogue box. */
+  chrome(on) {
+    const targets = [this.legend, this.menuBtn].filter(Boolean);
+    this.tweens.killTweensOf(targets);
+    this.tweens.add({ targets, alpha: on ? 1 : 0, duration: on ? 260 : 120 });
+  }
+
+  /** PC only: a small key legend in the bottom-right corner. Each row leaves
+   *  once the player has used that control a few times; the legend is gone
+   *  when they know them all (remembered per browser, see systems/hints.js). */
+  buildLegend() {
+    if (TOUCH || allLearned()) return;
+    this.legend = this.add.container(0, 0).setDepth(880);
+    this.legendRows = {};
+    for (const id of HINT_IDS) {
+      if (isLearned(id)) continue;
+      const [key, what] = LEGEND[id];
+      const row = this.add.container(GAME_W - 16, 0);
+      const label = text(this, 0, 0, what, 15, '#e9e4ff').setOrigin(1, 0.5).setAlpha(0.9);
+      const cap = text(this, 0, 0, key, 13, '#fff7e6', { fontStyle: 'bold' }).setOrigin(0.5);
+      const cw = Math.max(26, cap.width + 14);
+      const capX = -label.width - 10 - cw / 2;
+      cap.setX(capX);
+      const g = this.add.graphics();
+      // a soft dark pill behind the row keeps it readable on bright ground
+      g.fillStyle(0x0b0d22, 0.42).fillRoundedRect(capX - cw / 2 - 6, -12, cw + label.width + 22, 24, 12);
+      g.fillStyle(0x0b0d22, 0.62).fillRoundedRect(capX - cw / 2, -10, cw, 20, 5);
+      g.lineStyle(1, 0xc9c2ff, 0.55).strokeRoundedRect(capX - cw / 2, -10, cw, 20, 5);
+      g.fillStyle(0xc9c2ff, 0.35).fillRect(capX - cw / 2 + 3, 8, cw - 6, 1);      // the key's lip
+      row.add([g, cap, label]);
+      this.legend.add(row);
+      this.legendRows[id] = row;
+    }
+    this.layoutLegend(false);
+    this.legend.setAlpha(0);
+    this.tweens.add({ targets: this.legend, alpha: 1, duration: 600, delay: 1200 });
+    const off = onLearned((id) => {
+      const row = this.legendRows?.[id];
+      if (!row) return;
+      delete this.legendRows[id];
+      this.tweens.add({ targets: row, alpha: 0, x: row.x + 18, duration: 320, ease: 'Sine.easeIn', onComplete: () => row.destroy() });
+      this.time.delayedCall(200, () => this.layoutLegend(true));
+      if (!Object.keys(this.legendRows).length) this.time.delayedCall(400, () => { this.legend?.destroy(); this.legend = null; });
+    });
+    this.events.once('shutdown', off);
+  }
+
+  layoutLegend(animate) {
+    const rows = HINT_IDS.map((id) => this.legendRows[id]).filter(Boolean);
+    rows.forEach((row, i) => {
+      const y = GAME_H - 24 - (rows.length - 1 - i) * 26;
+      if (animate) this.tweens.add({ targets: row, y, duration: 260, ease: 'Sine.easeOut' });
+      else row.setY(y);
+    });
+  }
+
+  /** PC: a clickable MENU chip in the bottom-left corner (same as pressing M). */
+  buildMenuButton() {
+    if (TOUCH) return;
+    const c = this.add.container(16, GAME_H - 54).setDepth(880);
+    const bg = panel(this, 0, 0, 112, 38, 'chip');
+    const g = this.add.graphics();
+    g.fillStyle(0xfff7e6, 0.9);
+    for (let i = 0; i < 3; i++) g.fillRoundedRect(16, 12 + i * 6, 16, 2.5, 1);       // the "hamburger"
+    const t = text(this, 42, 7, 'MENU', 20, '#fff7e6', { fontStyle: 'bold' });
+    const zone = this.add.zone(0, 0, 112, 38).setOrigin(0).setInteractive({ useHandCursor: true });
+    zone.on('pointerover', () => bg.setTint(0xd8f8ec));
+    zone.on('pointerout', () => bg.clearTint());
+    zone.on('pointerdown', () => {
+      this.tweens.add({ targets: c, scale: 0.95, duration: 60, yoyo: true });
+      press('menu');
+    });
+    c.add([bg, g, t, zone]);
+    this.menuBtn = c;
   }
 
   /** Cinematic framing for the Elite Hall walk: letterbox bars and a vignette. */
@@ -346,8 +439,8 @@ export class OverworldUIScene extends Phaser.Scene {
     t(80, 60, 'TRAINER PROFILE', 32, '#ffc94a', { fontStyle: 'bold' });
     t(80, 110, `Name: ${s.player.name}`);
     t(520, 110, `Run: ${formatRun(s.run.clearMs ?? s.run.ms)}${s.run.clearMs ? '  (CLEARED)' : ''}`, 24, s.run.clearMs ? '#ffc94a' : '#2ef2a8');
-    t(80, 150, 'Airdrop wallet:', 20, '#a8acd6');
-    t(80, 176, s.player.wallet || '(none yet - add one below)', 20, s.player.wallet ? '#2ef2a8' : '#ff6b7a', { wordWrap: { width: 800, useAdvancedWrap: true } });
+    t(80, 150, 'Payout wallet:', 20, '#a8acd6');
+    t(80, 176, s.player.wallet || '(none - add one with EDIT WALLET)', 20, s.player.wallet ? '#2ef2a8' : '#ff6b7a', { wordWrap: { width: 800, useAdvancedWrap: true } });
     t(80, 240, `SCORE: ${s.score}`, 28, '#ffc94a');
     TRAINER_ORDER.forEach((id, i) => {
       const d = s.defeated[id];
@@ -361,12 +454,14 @@ export class OverworldUIScene extends Phaser.Scene {
     if (i === 0) await this.editWallet();
   }
 
-  editWallet() {
+  /** Edit the payout wallet. required: no CANCEL (a save from before wallets
+   *  were mandatory has to add one before playing on). */
+  editWallet({ required = false } = {}) {
     const s = getSave();
     return new Promise((resolve) => {
       const bg = panel(this, 60, 150, 840, 300, 'gold').setDepth(1400);
-      const lbl = text(this, GAME_W / 2, 180, 'Paste your wallet address — this is where your airdrop will be sent if you qualify', 22, '#fff7e6', { wordWrap: { width: 760 }, align: 'center' }).setOrigin(0.5, 0).setDepth(1401);
-      const err = text(this, GAME_W / 2, 350, 'SAVE (A / ENTER) · CANCEL (B / ESC)', 18, '#a8acd6').setOrigin(0.5).setDepth(1401);
+      const lbl = text(this, GAME_W / 2, 180, WALLET_PROMPT, 22, '#fff7e6', { wordWrap: { width: 760 }, align: 'center' }).setOrigin(0.5, 0).setDepth(1401);
+      const err = text(this, GAME_W / 2, 350, '', 18, '#a8acd6').setOrigin(0.5).setDepth(1401);
       const inp = domInput(this, GAME_W / 2, 290, { width: 720, maxLength: 128 });
       inp.el.value = s.player.wallet;
       inp.el.style.fontSize = '22px';
@@ -375,17 +470,23 @@ export class OverworldUIScene extends Phaser.Scene {
       const close = () => { release(); inp.destroy(); bg.destroy(); lbl.destroy(); err.destroy(); btns.forEach((b) => b.destroy()); resolve(); };
       const save = () => {
         const v = inp.value().trim();
-        if (v && !validWallet(v)) { err.setText('That address looks invalid (no spaces, 4-128 characters).').setColor('#ff6b7a'); return; }
+        if (!validWallet(v)) { sfx('bump'); err.setText(v ? 'That address looks invalid (no spaces, 4-128 characters).' : 'A wallet address is required.').setColor('#ff6b7a'); return; }
         s.player.wallet = v;
         writeSave();
         close();
       };
       // tappable buttons + the touch pad's A/B for phones
-      btns.push(tapButton(this, GAME_W / 2 - 120, 405, 'SAVE', save, { w: 200, h: 50, depth: 1402 }));
-      btns.push(tapButton(this, GAME_W / 2 + 120, 405, 'CANCEL', close, { w: 200, h: 50, depth: 1402, style: 'chip', color: '#fff7e6' }));
-      release = pushFocus((a) => { if (a === 'confirm') save(); if (a === 'cancel') close(); }, this);
+      const cancel = () => { if (!required) close(); };
+      if (required) {
+        btns.push(tapButton(this, GAME_W / 2, 405, 'SAVE', save, { w: 240, h: 50, depth: 1402 }));
+        err.setText('A wallet address is required to keep playing.');
+      } else {
+        btns.push(tapButton(this, GAME_W / 2 - 120, 405, 'SAVE', save, { w: 200, h: 50, depth: 1402 }));
+        btns.push(tapButton(this, GAME_W / 2 + 120, 405, 'CANCEL', close, { w: 200, h: 50, depth: 1402, style: 'chip', color: '#fff7e6' }));
+      }
+      release = pushFocus((a) => { if (a === 'confirm') save(); if (a === 'cancel') cancel(); }, this);
       inp.el.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') { e.preventDefault(); close(); }
+        if (e.key === 'Escape') { e.preventDefault(); cancel(); }
         if (e.key === 'Enter') { e.preventDefault(); save(); }
       });
     });

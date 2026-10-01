@@ -74,8 +74,11 @@ export class TitleScene extends Phaser.Scene {
 
     // --- prompt
     this.promptChip = this.add.container(0, 0).setAlpha(0);
-    this.promptChip.add(panel(this, GAME_W / 2 - 130, 560, 260, 38, 'glass'));
-    this.promptChip.add(text(this, GAME_W / 2, 565, 'PRESS ENTER', 24, '#2ef2a8', { fontStyle: 'bold' }).setOrigin(0.5, 0));
+    const touch = window.matchMedia?.('(pointer: coarse)').matches;
+    const prompt = touch ? 'TAP TO START' : 'CLICK OR PRESS ENTER';
+    const pw = touch ? 260 : 340;
+    this.promptChip.add(panel(this, GAME_W / 2 - pw / 2, 560, pw, 38, 'glass'));
+    this.promptChip.add(text(this, GAME_W / 2, 565, prompt, 24, '#2ef2a8', { fontStyle: 'bold' }).setOrigin(0.5, 0));
     this.tweens.add({ targets: this.promptChip, alpha: 1, duration: 500, delay: 900, onComplete: () => {
       this.tweens.add({ targets: this.promptChip, alpha: 0.45, duration: 700, yoyo: true, repeat: -1 });
     } });

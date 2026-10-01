@@ -30,6 +30,7 @@ export class BootScene extends Phaser.Scene {
       this.load.spritesheet(`player_${g}`, `${BASE}sprites/${e.walk}`, { frameWidth: e.frameWidth, frameHeight: e.frameHeight });
       this.load.image(`player_${g}_full`, `${BASE}sprites/${e.full}`);
     }
+    this.load.image('mia_full', `${BASE}sprites/trainers/mia_full.png`);   // Professor Mia (tools/make_mia.py)
     this.load.image('tileset', `${BASE}tiles/tileset.png`);
     // title screen: first frame of the drone flight (the video itself streams in the Title scene)
     this.load.image('title_poster', `${BASE}title/poster.jpg`);

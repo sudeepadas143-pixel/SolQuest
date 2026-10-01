@@ -24,6 +24,7 @@ import { trainerArt } from '../ui/trainerArt.js';
 import { looseRng } from '../systems/rng.js';
 import { heldDirection, isHeld, pushFocusToken } from '../systems/controls.js';
 import { wait } from '../ui/helpers.js';
+import { used } from '../systems/hints.js';
 
 const DELTA = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 
@@ -149,6 +150,8 @@ export class OverworldScene extends Phaser.Scene {
     this.scene.launch('OverworldUI');
     this.ui = this.scene.get('OverworldUI');
     this.focus = pushFocusToken((a) => this.onAction(a), this);
+    this.path = null;
+    this.input.on('pointerdown', (p) => this.onPointer(p));
     // Scene event emitters survive restarts, so detach on shutdown to avoid
     // handling one battle result twice after coming back from the Hall of Fame.
     const onResume = (_sys, data) => this.onBattleEnd(data);
@@ -163,6 +166,8 @@ export class OverworldScene extends Phaser.Scene {
     this.time.delayedCall(50, () => this.applyArea());      // (re)applies the Hall's cinema bars once the UI exists
     this.nightMusic = null;
     this.updateMusic(true);
+    // wallets are required: an old save without one adds it before moving on
+    if (!this.save.player.wallet) this.time.delayedCall(700, () => this.runLocked(() => this.ui.editWallet({ required: true })));
   }
 
   // ------------------------------------------------------------------ helpers
@@ -313,7 +318,12 @@ export class OverworldScene extends Phaser.Scene {
     if (!this.save) return;
     if (!this.locked) this.updateMusic();
     if (this.moving || this.locked || !this.focus.isTop()) return;
+    if (this.pendingClick) { const c = this.pendingClick; this.pendingClick = null; this.planTo(c.x, c.y); }
     const dir = heldDirection();
+    if (this.path) {
+      if (dir) this.clearPath();                 // the keyboard takes over
+      else { this.followPath(); return; }
+    }
     if (!dir) {
       if (Number(this.player.frame.name) !== this.idleFrame(this.facing)) this.face(this.facing);
       return;
@@ -342,7 +352,7 @@ export class OverworldScene extends Phaser.Scene {
     this.moving = true;
     // the Hall before Cooker falls: no running, a slower, heavier step
     const tense = this.indoors && !this.save.defeated.cooker;
-    const running = !tense && isHeld('run');
+    const running = !tense && (isHeld('run') || !!this.path?.run);
     const WALK = tense ? WALK_MS * 1.45 : WALK_MS;
     // Frames are locked to the tile step, like the handheld games: each tile is
     // one step (alternating feet); running shows contact then airborne frames.
@@ -355,6 +365,7 @@ export class OverworldScene extends Phaser.Scene {
     this.player.setFrame(row + seq[0]);
     const dur = running ? RUN_MS : WALK;
     const t0 = this.time.now;
+    if (!this.path) used(running ? 'run' : 'move');      // the controls legend learns as you go
     if (this.map.isEncounter(nx, ny)) {
       // the rustle starts as you push in, the blades shake mid-stride
       sfx('grass', { run: running });
@@ -415,19 +426,147 @@ export class OverworldScene extends Phaser.Scene {
     }
   }
 
+  // ------------------------------------------------------------ mouse / tap
+  // Click a tile to walk there; click a trainer, item, sign, door or landmark
+  // to walk up to it and use it. Long trips run. A direction key takes over.
+  onPointer(p) {
+    if (this.locked || !this.focus.isTop() || p.rightButtonDown()) return;
+    if (this.ui?.input.hitTestPointer(p).length) return;     // a HUD button took it
+    // (the pointer is shared by every scene: map the screen point through our camera)
+    const w = this.cameras.main.getWorldPoint(p.x, p.y);
+    if (this.moving) { this.pendingClick = { x: w.x, y: w.y }; return; }
+    this.planTo(w.x, w.y);
+  }
+
+  /** What a click at world (wx, wy) means: a thing to use, or a tile to reach. */
+  pickTarget(wx, wy) {
+    // characters and capsules are tall: hit their sprites, not just the tile
+    for (const [k, id] of this.npcAt) {
+      const s = this.npcSprites[id];
+      if (s?.getBounds().contains(wx, wy)) { const [x, y] = k.split(',').map(Number); return { use: true, x, y }; }
+    }
+    for (const it of this.itemAt.values()) {
+      const s = this.itemSprites.get(it.id);
+      if (s?.getBounds().contains(wx, wy)) return { use: true, x: it.x, y: it.y };
+    }
+    const x = Math.floor(wx / TILE_W);
+    const y = Math.floor(wy / TILE_H);
+    if (x < 0 || y < 0 || x >= this.map.w || y >= this.map.h) return null;
+    if (this.walkable(x, y)) return { use: false, x, y };
+    const k = this.map.key(x, y);
+    const usable = this.npcAt.has(k) || this.itemAt.has(k) || this.map.doors.has(k) || this.map.signs.has(k)
+      || this.map.lore.has(k) || (x === HALL.gate.x && y === HALL.gate.y);
+    if (usable) return { use: true, x, y };
+    // a wall or a roof: the nearest open tile to where you clicked
+    for (let r = 1; r <= 3; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.abs(dx) + Math.abs(dy) !== r) continue;
+          if (this.walkable(x + dx, y + dy)) return { use: false, x: x + dx, y: y + dy };
+        }
+      }
+    }
+    return null;
+  }
+
+  planTo(wx, wy) {
+    const t = this.pickTarget(wx, wy);
+    if (!t) return;
+    let goals;
+    if (t.use) {
+      const k = this.map.key(t.x, t.y);
+      // doors and the Hall gate are used from below, facing up; the rest from any side
+      const fromBelow = this.map.doors.has(k) || (t.x === HALL.gate.x && t.y === HALL.gate.y);
+      goals = (fromBelow ? [[0, 1]] : [[0, 1], [0, -1], [-1, 0], [1, 0]]).map(([dx, dy]) => ({ x: t.x + dx, y: t.y + dy }));
+    } else goals = [{ x: t.x, y: t.y }];
+    const steps = this.findPath(goals);
+    if (!steps) { sfx('bump'); return; }
+    this.path = { steps, use: t.use ? { x: t.x, y: t.y } : null, run: steps.length > 6 };
+    used('click');
+    this.markTarget(t);
+    if (!steps.length) this.followPath();
+  }
+
+  /** Breadth-first search over walkable tiles to the nearest goal: a list of tiles. */
+  findPath(goals) {
+    const W = this.map.w;
+    const want = new Set(goals.filter((g) => g.x === this.pos.x && g.y === this.pos.y || this.walkable(g.x, g.y)).map((g) => g.y * W + g.x));
+    if (!want.size) return null;
+    const start = this.pos.y * W + this.pos.x;
+    const prev = new Map([[start, -1]]);
+    const queue = [start];
+    for (let qi = 0; qi < queue.length && qi < 6000; qi++) {
+      const cur = queue[qi];
+      if (want.has(cur)) {
+        const out = [];
+        for (let c = cur; c !== start; c = prev.get(c)) out.push({ x: c % W, y: Math.floor(c / W) });
+        return out.reverse();
+      }
+      const cx = cur % W;
+      const cy = Math.floor(cur / W);
+      for (const [dx, dy] of Object.values(DELTA)) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        const n = ny * W + nx;
+        if (prev.has(n) || !this.walkable(nx, ny)) continue;
+        prev.set(n, cur);
+        queue.push(n);
+      }
+    }
+    return null;
+  }
+
+  followPath() {
+    const path = this.path;
+    const next = path.steps.shift();
+    if (!next) {
+      this.path = null;
+      if (path.use) {
+        const { x, y } = path.use;
+        const dir = x < this.pos.x ? 'left' : x > this.pos.x ? 'right' : y < this.pos.y ? 'up' : 'down';
+        this.face(dir);
+        this.interactAt(x, y, false);
+      }
+      return;
+    }
+    const dir = next.x < this.pos.x ? 'left' : next.x > this.pos.x ? 'right' : next.y < this.pos.y ? 'up' : 'down';
+    if (!this.walkable(next.x, next.y)) { this.clearPath(); this.face(dir); return; }
+    this.facing = dir;
+    this.tryStep(dir);
+  }
+
+  clearPath() {
+    this.path = null;
+    this.pendingClick = null;
+    this.marker?.destroy();
+    this.marker = null;
+  }
+
+  /** A soft ring where you clicked. */
+  markTarget(t) {
+    this.marker?.destroy();
+    const f = this.tileFoot(t.x, t.y);
+    const ring = this.add.ellipse(f.x, f.y - 3, 22, 9).setStrokeStyle(1.5, t.use ? 0xffc94a : 0x2ef2a8, 0.9).setDepth(f.y - 1);
+    this.marker = ring;
+    this.tweens.add({ targets: ring, scaleX: 1.35, scaleY: 1.35, alpha: 0, duration: 650, ease: 'Sine.easeOut', onComplete: () => { ring.destroy(); if (this.marker === ring) this.marker = null; } });
+  }
+
   // -------------------------------------------------------------- interaction
   onAction(a) {
     if (this.locked || this.moving) return;
     if (a === 'confirm') {
+      used('use');
       const [dx, dy] = DELTA[this.facing];
       this.interactAt(this.pos.x + dx, this.pos.y + dy, false);
     } else if (a === 'menu') {
+      used('menu');
       sfx('open');
       this.runLocked(() => this.ui.pauseMenu());
     }
   }
 
   async runLocked(fn) {
+    this.clearPath();
     this.locked = true;
     this.player.anims.stop();
     this.player.setFrame(this.idleFrame(this.facing));
@@ -800,6 +939,7 @@ export class OverworldScene extends Phaser.Scene {
 
   startBattle(cfg) {
     return new Promise((resolve) => {
+      this.clearPath();
       this.locked = true;
       this.pendingBattle = resolve;
       this.player.anims.stop();

@@ -9,6 +9,9 @@ import { panelTexture } from '../ui/skin.js';
 import { fadeTo, yesNo, tween, wait } from '../ui/helpers.js';
 import { backdrop } from '../ui/backdrop.js';
 
+const TOUCH = window.matchMedia?.('(pointer: coarse)').matches;
+const LOOK_HINT = TOUCH ? 'Tap a Trainer to choose.' : 'Click a Trainer to choose (or use ← → and ENTER).';
+
 export class LookScene extends Phaser.Scene {
   constructor() { super('Look'); }
 
@@ -30,10 +33,15 @@ export class LookScene extends Phaser.Scene {
     this.index = 0;
     this.draw();
     this.box = new DialogBox(this, { x: 30, y: 470, w: GAME_W - 60, h: 140 });
-    this.box.say('Use LEFT / RIGHT to choose, ENTER to confirm.', { wait: false });
+    this.box.say(LOOK_HINT, { wait: false });
 
+    // the whole card: hover highlights it, click picks it
     this.options.forEach((o, i) => {
-      o.img.setInteractive({ useHandCursor: true }).on('pointerdown', () => { this.index = i; this.draw(); this.confirm(); });
+      for (const t of [o.card, o.img]) {
+        t.setInteractive({ useHandCursor: true })
+          .on('pointerover', () => { if (this.busy || this.index === i) return; this.index = i; sfx('cursor'); this.draw(); })
+          .on('pointerdown', () => { if (this.busy) return; this.index = i; this.draw(); this.confirm(); });
+      }
     });
     this.release = pushFocus((a) => this.onAction(a), this);
   }
@@ -64,7 +72,7 @@ export class LookScene extends Phaser.Scene {
     const ok = await yesNo(this, { x: GAME_W - 230, y: 300 });
     if (!ok) {
       this.busy = false;
-      this.box.say('Use LEFT / RIGHT to choose, ENTER to confirm.', { wait: false });
+      this.box.say(LOOK_HINT, { wait: false });
       this.release = pushFocus((a) => this.onAction(a), this);
       return;
     }
