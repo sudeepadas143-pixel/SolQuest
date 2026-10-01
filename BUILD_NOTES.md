@@ -500,14 +500,23 @@ same level for Cooker.
 
 ### Townspeople
 
-- Five townspeople from the art sheet `tools/src_art/townsfolk_1.png`:
+- Nine townspeople from the art sheets `tools/src_art/townsfolk_1.png` and `townsfolk_2.png`:
   - Rafi (the cap kid) in the start town.
+  - Auntie Pearl (shopping bags) on Market Row.
   - Tilly at the Market Square fountain.
+  - Nell (bug net) at the fork.
   - Bram (net) on the Willow Pond bank.
   - Joss (farmer) by the windmill.
+  - Hazel (berry bucket) by the well and cabin.
+  - Pip (straw hat) among the northern houses.
   - Mr. Alder (gardener) in the Orchard.
+- The second sheet's bottom-row action poses of the net boy, cap kid and farmer are not used; they repeat characters that are already in.
 - `tools/make_townsfolk.py` builds the sprites:
-  - It cuts the four views, resamples them, recolours the cap kid's ball to Sol purple/green, and works out which way each side view faces (it can be pinned per character).
+  - It cuts the four views (or three: front, side, back, with the side mirrored), keys out the backdrop and resamples them.
+    - Keying only removes green that touches the crop's edge, plus enclosed gaps that are truly backdrop-coloured, so teal clothes stay solid.
+  - It recolours red-and-white balls (in a hand, on a bag) to the game's violet and mint.
+    - A ball is a red blob, by hue and ball-sized, with white beside it, inside a height band; this runs at full resolution and again after resampling.
+  - It works out which way each side view faces (this can be pinned per character).
   - It poses walk frames with the simple poser and writes `public/assets/sprites/townsfolk/` plus `src/data/townsfolkSprites.json`.
   - The badge's head square is also set per character there.
   - To add more people, add the sheet and an entry in `SHEETS`, then an entry in `src/data/townsfolk.js`.

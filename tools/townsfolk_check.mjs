@@ -4,6 +4,7 @@
 //   node tools/townsfolk_check.mjs [outDir]   (needs a VITE_DEBUG=1 build on :4173)
 import { chromium } from 'playwright';
 import fs from 'node:fs';
+import { TOWNSFOLK } from '../src/data/townsfolk.js';
 
 const OUT = process.argv[2] ?? 'tools/_towns';
 fs.mkdirSync(OUT, { recursive: true });
@@ -27,7 +28,7 @@ await p.waitForFunction(() => window.__game.scene.isActive('Overworld'));
 await sleep(1500);
 
 const ids = await ow(() => window.__game.scene.getScene('Overworld').townsfolk.people.map((q) => q.def.id));
-check(ids.length === 5, `${ids.length} townspeople on the map`);
+check(ids.length === TOWNSFOLK.length, `${ids.length} of ${TOWNSFOLK.length} townspeople on the map`);
 
 const locked = () => ow(() => window.__game.scene.getScene('Overworld').locked);
 const speaker = () => ow(() => { const u = window.__game.scene.getScene('OverworldUI'); return u.box.tabText.visible ? u.box.tabText.text : null; });
@@ -60,7 +61,7 @@ for (let i = 0; i < ids.length; i++) {
   await p.keyboard.press('Enter');
   await sleep(900);
   check((await speaker()) === spot.name, `${ids[i]}: ENTER talks (${await speaker()})`);
-  await shot(`${String(i + 1).padStart(2, '0')}_${ids[i]}_talk`);
+  await shot(`talk_${String(i + 1).padStart(2, '0')}_${ids[i]}`);
   await clear();
   check(!(await locked()), `${ids[i]}: conversation closes`);
 
@@ -122,7 +123,7 @@ for (const [i] of ids.entries()) {
       if (q.x === st.pos.x && q.y === st.pos.y) overlap += 1;
     });
   }
-  if (i === 1) await shot('06_market_wander');
+  if (i === 1) await shot('wander_market');
 }
 check(overlap === 0, `never on the player's tile (${overlap})`);
 check(outside === 0, `always inside their patch (${outside})`);

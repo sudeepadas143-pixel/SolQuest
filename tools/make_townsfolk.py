@@ -39,13 +39,30 @@ SHEETS = {
         dict(id='gardener', rows=(385, 740), xs=[(153, 352), (382, 550), (577, 712), (731, 910)], h=96, head=(14, 14, 40)),
         dict(id='farmer', rows=(385, 740), xs=[(1084, 1277), (1303, 1420), (1480, 1684), (1740, 1983)], h=100, head=(22, 10, 38)),
     ],
+    'townsfolk_2.png': [
+        dict(id='shopper', rows=(50, 380), xs=[(12, 185), (190, 300), (300, 484), (493, 613)], h=90, ball=True, ball_zone=(0.45, 0.95), head=(18, 10, 42)),
+        dict(id='picker', rows=(50, 380), xs=[(678, 806), (830, 950), (973, 1092), (1107, 1223)], h=94, head=(12, 10, 38)),
+        dict(id='strawkid', rows=(50, 380), xs=[(1279, 1435), (1450, 1593), (1628, 1775), (1799, 1941)], h=82, ball=True, head=(11, 10, 40)),
+        dict(id='buggirl', rows=(408, 742), xs=[(24, 176), (178, 298), (300, 494)], h=80, head=(12, 12, 38)),
+    ],
 }
 
 
 def cut(a, y0, y1, x0, x1):
     """RGBA crop of one figure, background keyed out, specks dropped."""
     crop = a[y0:y1, x0:x1]
-    fg = np.abs(crop.astype(int) - BG).sum(2) > 60
+    d = np.abs(crop.astype(int) - BG).sum(2)
+    # background: green-ish regions reaching the crop's edge, plus enclosed gaps
+    # (between an arm and the body) that are truly background-coloured - so
+    # teal clothes close to the backdrop green stay solid
+    lab, n = ndimage.label(d <= 60)
+    edge = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))) - {0}
+    bg = np.isin(lab, list(edge))
+    for i in set(range(1, n + 1)) - edge:
+        comp = lab == i
+        if comp.sum() > 30 and d[comp].mean() < 22:
+            bg |= comp
+    fg = ~bg
     lab, n = ndimage.label(fg)
     if n > 1:
         sizes = ndimage.sum(fg, lab, range(1, n + 1))
@@ -86,18 +103,32 @@ def resample(rgba, H, colors=48):
     return out
 
 
-def recolor_ball(img):
-    """The cap kid's red-and-white ball becomes the game's own capsule colours
-    (violet over mint) - no outside IP in the game."""
+def recolor_ball(img, zone=(0.0, 0.7)):
+    """Red-and-white balls (in a hand, on a bag) become the game's own capsule
+    colours (violet over mint) - no outside IP in the game. A ball is a red
+    blob with white right beside it, inside `zone` (fractions of the height),
+    so red shoes and trims are left alone."""
     rgb = img[..., :3].astype(int)
-    red = (rgb[..., 0] > 170) & (rgb[..., 1] < 90) & (rgb[..., 2] < 90) & (img[..., 3] > 0)
-    if red.any():
-        ys, xs = np.nonzero(red)
-        y0, y1, x0, x1 = ys.min() - 3, ys.max() + 5, xs.min() - 3, xs.max() + 4
+    h = img.shape[0]
+    # red by hue, not brightness: the balls' red is a dark brick once resampled
+    # (skin and brown hair stay under the ratio)
+    red = (rgb[..., 0] > 80) & (rgb[..., 0] > 2 * rgb[..., 1]) & (rgb[..., 0] > 1.8 * rgb[..., 2]) & (img[..., 3] > 0)
+    red[: int(h * zone[0])] = False
+    red[int(h * zone[1]):] = False
+    white_all = (rgb.min(2) > 185) & (img[..., 3] > 0)
+    lab, n = ndimage.label(red, structure=np.ones((3, 3)))
+    for i in range(1, n + 1):
+        comp = lab == i
+        ys, xs = np.nonzero(comp)
+        r = max(2, (ys.max() - ys.min() + 1))
+        if max(r, xs.max() - xs.min() + 1) > 0.1 * h + 2:
+            continue                                # bigger than a ball: a bag, a belt
         box = np.zeros(red.shape, bool)
-        box[max(0, y0):y1, max(0, x0):x1] = True
-        white = box & (rgb.min(2) > 200) & (img[..., 3] > 0)
-        img[red] = (153, 69, 255, 255)
+        box[max(0, ys.min() - 2):ys.max() + r + 2, max(0, xs.min() - 2):xs.max() + 3] = True
+        white = box & white_all
+        if white.sum() < 0.4 * comp.sum():
+            continue
+        img[comp] = (153, 69, 255, 255)
         img[white] = (20, 241, 149, 255)
     return img
 
@@ -131,9 +162,17 @@ def main():
         a = np.asarray(Image.open(os.path.join(HERE, 'src_art', sheet)).convert('RGB'))
         for ch in chars:
             y0, y1 = ch['rows']
-            views = [resample(cut(a, y0, y1, x0, x1), ch['h']) for x0, x1 in ch['xs']]
+            cuts = [cut(a, y0, y1, x0, x1) for x0, x1 in ch['xs']]
+            zone = ch.get('ball_zone', (0.0, 0.7))
             if ch.get('ball'):
-                views = [recolor_ball(v) for v in views]
+                # before resampling too: the palette can fold a small ball's red into nearby orange
+                cuts = [recolor_ball(c, zone) for c in cuts]
+            views = [resample(c, ch['h']) for c in cuts]
+            if ch.get('ball'):
+                views = [recolor_ball(v, zone) for v in views]
+            if len(views) == 3:
+                # front / side / back only: the other side is the mirror image
+                views.append(views[1])
             front, s2, back, s4 = views
             # facing can be pinned per character when a hat brim fools the skin test
             f2, f4 = ch.get('face') or (facing(s2), facing(s4))

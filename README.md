@@ -84,7 +84,7 @@ take-backs) → wallet (required) → overworld.
 
 The route runs south to north:
 - **Start town**, then **Trainer 1**, who blocks the only gap in the first hedge wall.
-- Townspeople wander the start town, Market Square, Willow Pond, the windmill and the Orchard; face one and press confirm (or click them) to chat.
+- Nine townspeople wander the towns, the fork, the pond, the windmill, the northern houses and the Orchard; face one and press confirm (or click them) to chat.
 - **The fork**: optional west and east loops, with **Trainer 2** and **Trainer 3**.
 - The loops reconverge at **The Solace**, the rest stop.
 - **Trainer 4** blocks the next wall.

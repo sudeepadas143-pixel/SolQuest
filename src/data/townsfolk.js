@@ -51,4 +51,40 @@ export const TOWNSFOLK = [
     ],
     after: [['So the Hall has a new name on its wall.', 'Come back in spring. The blossom will be out, and you can tell me how it went.']],
   },
+  {
+    id: 'shopper', name: 'AUNTIE PEARL', home: { x: 52, y: 123 }, area: [43, 121, 68, 125],
+    lines: [
+      ["Oh, these bags! The market had a sale on potions. I bought eleven. I don't even have a creature.", "Here's a tip, dear: potions work in the middle of a battle. Don't save them for a rainy day."],
+      ["The shopkeeper's off watching the Elite battles, so I left the money on the counter. Honest folk, round here."],
+      ['You look like you skipped breakfast. Trainers always do. Eat something before the Hall, promise me.'],
+    ],
+    after: [['Champion! I knew it the moment I saw you. Well, the second moment.', "I'm telling everyone at the market. Twice."]],
+  },
+  {
+    id: 'picker', name: 'HAZEL', home: { x: 60, y: 70 }, area: [56, 68, 69, 72],
+    lines: [
+      ['Wild berries grow round the pond. Creatures love them too, so I have to be quick.'],
+      ["Joss says the windmill oils itself. I've seen the oil can by his door. I'm not saying anything."],
+      ["The well water's cold even in summer. Good for the berries, bad for my fingers."],
+    ],
+    after: [['I saw the lights on in the Elite Hall last night. Was that your victory party?', 'Next time, invite the berry girl. I bring snacks.']],
+  },
+  {
+    id: 'strawkid', name: 'PIP', home: { x: 24, y: 58 }, area: [19, 56, 29, 60],
+    lines: [
+      ["See this capsule? Found it in the grass. It's empty, but I'm keeping it anyway."],
+      ['The grass up here is way thicker than down south, and the creatures are bigger. I only go in up to my ankles.'],
+      ['Wanna know a secret? Something sparkles in the grass way over west of here. I saw it once!'],
+    ],
+    after: [["You're the champion now! Can I hold your capsule? Just for a second? I'll give it back. Probably."]],
+  },
+  {
+    id: 'buggirl', name: 'NELL', home: { x: 12, y: 93 }, area: [7, 92, 17, 95],
+    lines: [
+      ['My net is for bugs, not creatures. Mostly. Some bugs are creatures, if you think about it.'],
+      ["Both branches loop back to the main road, and there's a Trainer on each one. I've watched them both. Neither of them catches bugs."],
+      ["Something sparkly fell in the grass on the west loop. I'd look, but I'm not allowed in tall grass after lunch."],
+    ],
+    after: [["Is it true you beat COOKER? I'm going to be a champion too. Of bugs."]],
+  },
 ];

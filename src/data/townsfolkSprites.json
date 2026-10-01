@@ -143,5 +143,121 @@
       10,
       38
     ]
+  },
+  "shopper": {
+    "sheet": "townsfolk/shopper.png",
+    "frameWidth": 76,
+    "frameHeight": 100,
+    "rows": [
+      "down",
+      "left",
+      "right",
+      "up"
+    ],
+    "frames": 7,
+    "walkFrames": [
+      1,
+      0,
+      2,
+      0
+    ],
+    "runFrames": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "head": [
+      18,
+      10,
+      42
+    ]
+  },
+  "picker": {
+    "sheet": "townsfolk/picker.png",
+    "frameWidth": 59,
+    "frameHeight": 104,
+    "rows": [
+      "down",
+      "left",
+      "right",
+      "up"
+    ],
+    "frames": 7,
+    "walkFrames": [
+      1,
+      0,
+      2,
+      0
+    ],
+    "runFrames": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "head": [
+      12,
+      10,
+      38
+    ]
+  },
+  "strawkid": {
+    "sheet": "townsfolk/strawkid.png",
+    "frameWidth": 61,
+    "frameHeight": 92,
+    "rows": [
+      "down",
+      "left",
+      "right",
+      "up"
+    ],
+    "frames": 7,
+    "walkFrames": [
+      1,
+      0,
+      2,
+      0
+    ],
+    "runFrames": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "head": [
+      11,
+      10,
+      40
+    ]
+  },
+  "buggirl": {
+    "sheet": "townsfolk/buggirl.png",
+    "frameWidth": 69,
+    "frameHeight": 90,
+    "rows": [
+      "down",
+      "left",
+      "right",
+      "up"
+    ],
+    "frames": 7,
+    "walkFrames": [
+      1,
+      0,
+      2,
+      0
+    ],
+    "runFrames": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "head": [
+      12,
+      12,
+      38
+    ]
   }
 }
