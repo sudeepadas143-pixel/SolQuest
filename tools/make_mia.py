@@ -36,18 +36,21 @@ def main():
             blk = idx[int(j * CELL) + 1:int((j + 1) * CELL) - 1, int(i * CELL) + 1:int((i + 1) * CELL) - 1].ravel()
             v, c = np.unique(blk, return_counts=True)
             rgb[j, i] = pal[v[np.argmax(c)]]
-    # background: near-black regions connected to the border
+    # background: near-black regions touching the border, plus any sizeable
+    # enclosed one (the gap between an arm on the hip and the body); thin
+    # dark detail lines inside the figure are far smaller and stay
     dark = rgb.max(2) < 40
-    lab, _ = ndimage.label(dark)
+    lab, n = ndimage.label(dark)
     border = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))) - {0}
-    bg = np.isin(lab, list(border))
+    sizes = ndimage.sum(dark, lab, range(1, n + 1))
+    big = {i + 1 for i, sz in enumerate(sizes) if sz >= 40}
+    bg = np.isin(lab, list(border | big))
     fig = ~bg
     # keep only the main figure (drop specks)
     flab, n = ndimage.label(fig)
     if n > 1:
         sizes = ndimage.sum(fig, flab, range(1, n + 1))
         fig = flab == (int(np.argmax(sizes)) + 1)
-        fig = ndimage.binary_fill_holes(fig)
     rgba = np.zeros((H, W, 4), np.uint8)
     rgba[..., :3] = rgb
     rgba[..., 3] = np.where(fig, 255, 0)
