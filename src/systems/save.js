@@ -47,10 +47,17 @@ function fixFireLine(s) {
   return true;
 }
 
+const savedListeners = new Set();
+/** Hear about every successful save (the HUD shows a small "Saved" mark). */
+export function onSaved(fn) { savedListeners.add(fn); return () => savedListeners.delete(fn); }
+
 export function writeSave() {
   if (!current) return;
   current.updatedAt = new Date().toISOString();
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(current)); } catch (e) { console.warn('save failed', e); }
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(current));
+    savedListeners.forEach((fn) => fn());
+  } catch (e) { console.warn('save failed', e); }
 }
 
 export function deleteSave() {

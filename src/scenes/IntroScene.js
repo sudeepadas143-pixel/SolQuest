@@ -22,7 +22,7 @@ export class IntroScene extends Phaser.Scene {
     // a soft light behind her, and her shadow on the floor
     this.halo = this.add.image(MIA_X, 300, 'glow').setScale(6).setTint(0xc8a8ff).setAlpha(0).setBlendMode(Phaser.BlendModes.ADD);
     this.floor = this.add.ellipse(MIA_X, GAME_H - 26, 190, 26, 0x05060f, 0).setDepth(1);
-    this.mia = this.add.image(MIA_X + 120, GAME_H - 30, 'mia_full').setOrigin(0.5, 1).setScale(2).setAlpha(0).setDepth(2);
+    this.mia = this.add.image(MIA_X + 120, GAME_H - 30, 'mia_full').setOrigin(0.5, 1).setAlpha(0).setDepth(2);
 
     this.box = new DialogBox(this, { x: 30, y: GAME_H - 170, w: GAME_W - 60, h: 150, size: 27 });
     this.box.speed = 15;
@@ -35,7 +35,7 @@ export class IntroScene extends Phaser.Scene {
     this.tweens.add({ targets: this.floor, fillAlpha: 0.35, duration: 600 });
     await tween(this, { targets: this.mia, x: MIA_X, alpha: 1, duration: 520, ease: 'Cubic.easeOut' });
     // ...and breathes (a slow, slight rise of the shoulders)
-    this.tweens.add({ targets: this.mia, scaleY: 2.012, duration: 1700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    this.tweens.add({ targets: this.mia, scaleY: 1.006, duration: 1700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
     let name = '';
     for (const line of INTRO_SCRIPT) {

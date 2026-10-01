@@ -825,9 +825,8 @@ export class OverworldScene extends Phaser.Scene {
       music(null);
       this.ui.hud?.(false);
       cam.stopFollow();
-      // the camera rises to the gate and leans in
+      // the camera rises to the gate (no zoom: pixel art at an in-between zoom shimmers)
       const door = this.standAt(HALL.gate.x, HALL.gate.y);
-      this.tweens.add({ targets: cam, zoom: WORLD_ZOOM * 1.12, duration: 1500, ease: 'Sine.easeInOut' });
       await panTo(door.x, door.y - 10, 1500);
       await wait(this, 350);
       // light leaks round the doors; the Hall shudders; they open

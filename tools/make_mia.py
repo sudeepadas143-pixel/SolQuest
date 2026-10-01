@@ -2,11 +2,12 @@
 (tools/src_art/professor_mia.png, 1024x1536 pixel art on black).
 
 The art is pixel art upscaled ~10x with fine details (eye lines, the smile)
-about half a block wide, so it is resampled on a 5.12 px grid (200x300): the
-image is first reduced to a fixed palette (no dithering), then each cell takes
-its most common colour. The black background is flood-filled away from the
-border, and the dark pixels it took off the figure's edge come back as a
-1-texel outline. Shown at 2x in the intro.
+about half a block wide. It is reduced to a fixed palette (no dithering) and
+resampled on 2.56 px cells (twice the block grid, ~230x590), each cell taking
+its most common colour, and shown 1:1 - about the texel density of the
+game's other portraits. The black background (touching the border, or any
+sizeable enclosed gap) is removed, and the dark edge pixels it took come
+back as a 1-texel outline.
 
     python3 tools/make_mia.py
 """
@@ -19,7 +20,7 @@ from scipy import ndimage
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, 'src_art', 'professor_mia.png')
 OUT = os.path.join(HERE, '..', 'public', 'assets', 'sprites', 'trainers', 'mia_full.png')
-CELL = 5.12
+CELL = 2.56
 COLORS = 96
 OUTLINE = (26, 22, 34, 255)
 
@@ -33,7 +34,8 @@ def main():
     rgb = np.zeros((H, W, 3), np.uint8)
     for j in range(H):
         for i in range(W):
-            blk = idx[int(j * CELL) + 1:int((j + 1) * CELL) - 1, int(i * CELL) + 1:int((i + 1) * CELL) - 1].ravel()
+            m = 1 if CELL >= 4 else 0              # skip the cell's edge texels when cells are big
+            blk = idx[int(j * CELL) + m:int((j + 1) * CELL) - m, int(i * CELL) + m:int((i + 1) * CELL) - m].ravel()
             v, c = np.unique(blk, return_counts=True)
             rgb[j, i] = pal[v[np.argmax(c)]]
     # background: near-black regions touching the border, plus any sizeable
@@ -43,7 +45,7 @@ def main():
     lab, n = ndimage.label(dark)
     border = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))) - {0}
     sizes = ndimage.sum(dark, lab, range(1, n + 1))
-    big = {i + 1 for i, sz in enumerate(sizes) if sz >= 40}
+    big = {i + 1 for i, sz in enumerate(sizes) if sz >= 40 * (5.12 / CELL) ** 2}
     bg = np.isin(lab, list(border | big))
     fig = ~bg
     # keep only the main figure (drop specks)

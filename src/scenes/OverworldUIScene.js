@@ -5,7 +5,7 @@ import { GAME_W, GAME_H, MAX_LEVEL } from '../config.js';
 import { ITEMS } from '../data/items.js';
 import { TRAINERS, TRAINER_ORDER } from '../data/trainers.js';
 import { MOVES } from '../data/moves.js';
-import { getSave, writeSave } from '../systems/save.js';
+import { getSave, writeSave, onSaved } from '../systems/save.js';
 import { heal, maxHp, displayName, gainXp, xpForLevel, learnMove, pendingEvolution } from '../systems/creature.js';
 import { trainerName } from '../systems/teams.js';
 import { clock, formatClock, formatRun, weather, WEATHER_LABEL, isNight } from '../systems/world.js';
@@ -71,6 +71,9 @@ export class OverworldUIScene extends Phaser.Scene {
 
     this.buildLegend();
     this.buildMenuButton();
+    // a small "Saved" mark whenever the game saves (autosaves included)
+    const offSaved = onSaved(() => this.savedMark());
+    this.events.once('shutdown', offSaved);
 
     this.banner = this.add.container(0, -90).setDepth(1500);
     this.toast = this.add.container(0, 0).setDepth(1500);
@@ -130,6 +133,24 @@ export class OverworldUIScene extends Phaser.Scene {
     this.box.setVisible(false);
     this.box.clear();
     this.chrome(true);
+  }
+
+  savedMark() {
+    if (!this.sys.isActive() || this.savedT?.isPlaying?.()) return;
+    if (!this.saved) {
+      const c = this.add.container(16, GAME_H - (TOUCH ? 34 : 92)).setDepth(890).setAlpha(0);
+      const g = this.add.graphics();
+      g.fillStyle(0x0b0d22, 0.55).fillRoundedRect(0, -13, 96, 26, 13);
+      // a little floppy disk
+      g.fillStyle(0x2ef2a8, 1).fillRoundedRect(10, -7, 14, 14, 2);
+      g.fillStyle(0x0b0d22, 1).fillRect(13, -7, 8, 5);
+      g.fillStyle(0xfff7e6, 1).fillRect(13, 2, 8, 4);
+      c.add([g, text(this, 32, -10, 'Saved', 16, '#e9e4ff')]);
+      this.saved = c;
+    }
+    this.tweens.killTweensOf(this.saved);
+    this.saved.setAlpha(0);
+    this.savedT = this.tweens.chain({ targets: this.saved, tweens: [{ alpha: 1, duration: 200 }, { alpha: 1, duration: 1000 }, { alpha: 0, duration: 400 }] });
   }
 
   /** The HUD chips fade away for cutscenes (the gate opening in the Hall). */

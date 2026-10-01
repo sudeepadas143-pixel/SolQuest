@@ -1120,40 +1120,67 @@ def hall_stage():
 
 
 def hall_gate(open_=False):
-    """The Hall of Fame gate in the back wall, standing on the dais (footprint
-    3 x 2 tiles: wall rows). Closed: violet leaves with gold studs and the Sol
-    mark. Open: the doorway blazes with light."""
+    """The Hall of Fame gate in the back wall, standing on the raised floor
+    (footprint 3 x 2 tiles: wall rows). An arched gateway: marble columns with
+    gold bases and capitals, a gilded arch with a keystone, the Sol mark above.
+    Closed: studded violet doors, light glowing through the seam. Open: the
+    whole arch blazes with light."""
     m = Model()
     W = 3 * T
     z0 = STAGE_H
+    yb = 2 * T                                 # front of the gate (the wall face)
     gold = I.flat(GOLD_HEX)
     gold_dk = I.flat('#b8902e')
-    yb = 2 * T                                 # front of the gate (wall face)
-    # pillars
-    for xa in (1, W - 8):
-        m.box(xa, yb - 7, z0, xa + 7, yb, z0 + 40, gold, south=gold_dk)
-        m.box(xa - 1, yb - 8, z0 + 40, xa + 8, yb + 1, z0 + 43, gold)
-    # lintel with the Sol mark
-    m.box(0, yb - 8, z0 + 43, W, yb + 1, z0 + 50, gold)
-    m.ellipsoid((W / 2, yb - 1, z0 + 47), (5.5, 1.4, 4.5), I.flat('#9945ff'))
-    m.ellipsoid((W / 2 + 2.2, yb - 0.6, z0 + 47), (2.8, 1, 2.6), I.flat('#14f195'))
+    marble = I.flat('#f1ecf8', jitter=2)
+    cx, r, zs = W / 2, 13.0, z0 + 28           # arch: centre x, radius, springing height
+    # columns
+    for xa in (1.5, W - 9.5):
+        m.box(xa - 1, yb - 8, z0, xa + 9, yb + 1, z0 + 3, gold)                  # base
+        m.box(xa, yb - 7, z0 + 3, xa + 8, yb, zs, marble)                        # shaft
+        m.box(xa + 1, yb - 0.4, z0 + 6, xa + 2, yb + 0.1, zs - 3, I.flat('#d8d0e6'))
+        m.box(xa + 6, yb - 0.4, z0 + 6, xa + 7, yb + 0.1, zs - 3, I.flat('#d8d0e6'))
+        m.box(xa - 1, yb - 8, zs, xa + 9, yb + 1, zs + 3, gold)                  # capital
+    # the arch: a gold band traced in short segments, a keystone, a cornice
+    seg = 14
+    for k in range(seg):
+        a0 = np.pi * k / seg
+        a1 = np.pi * (k + 1) / seg
+        p0 = (cx - np.cos(a0) * (r + 3), zs + 3 + np.sin(a0) * (r + 3))
+        p1 = (cx - np.cos(a1) * (r + 3), zs + 3 + np.sin(a1) * (r + 3))
+        q0 = (cx - np.cos(a0) * r, zs + 3 + np.sin(a0) * r)
+        q1 = (cx - np.cos(a1) * r, zs + 3 + np.sin(a1) * r)
+        m.quad((p0[0], yb + 0.5, p0[1]), (p1[0], yb + 0.5, p1[1]), (q1[0], yb + 0.5, q1[1]), (q0[0], yb + 0.5, q0[1]), gold)
+    m.box(cx - 3, yb - 2, zs + r + 1, cx + 3, yb + 1, zs + r + 8, gold, south=gold_dk)          # keystone
+    m.box(0, yb - 8, zs + r + 6, W, yb + 1, zs + r + 9, gold)                                   # cornice
+    m.ellipsoid((cx, yb + 1, zs + r + 12), (4.6, 1.2, 3.6), I.flat('#9945ff'))                 # the Sol mark
+    m.ellipsoid((cx + 1.8, yb + 1.5, zs + r + 12), (2.4, 0.8, 2.0), I.flat('#14f195'))
+    # the opening: a rectangle up to the springing line, then the arch's half-disc
+    def opening(sh, inset=0.0, depth=1.5):
+        x0, x1 = cx - r + inset, cx + r - inset
+        m.box(x0, yb - depth, z0, x1, yb - depth + 1, zs + 3, sh)
+        steps = 8
+        for k in range(steps):
+            za = zs + 3 + (r - inset) * k / steps
+            zb = zs + 3 + (r - inset) * (k + 1) / steps
+            half = np.sqrt(max(0.0, (r - inset) ** 2 - (za - zs - 3) ** 2))
+            m.box(cx - half, yb - depth, za, cx + half, yb - depth + 1, zb, sh)
     if open_:
-        m.box(8, yb - 3, z0, W - 8, yb - 1.5, z0 + 40, I.glow('#fff1c8'))
-        m.box(10, yb - 2, z0, W - 10, yb - 0.5, z0 + 37, I.glow('#ffd77a'))
+        opening(I.glow('#fff1c8'))
+        opening(I.glow('#ffd77a'), inset=3, depth=0.8)
     else:
-        leaf = c('#4a2c86')
-        studs = c(GOLD_HEX)
+        leaf, studs = c('#4a2c86'), c(GOLD_HEX)
 
         def leaves(P, uv, n):
             x, z = P[:, 0], P[:, 2] - z0
             out = np.tile(leaf, (len(P), 1))
-            seam = np.abs(x - W / 2) < 0.6
-            stud = ((np.abs((x - 8) % 6 - 3) < 0.9) & (np.abs(z % 8 - 4) < 0.9))
-            band = (np.abs(z - 18) < 1.0) | (np.abs(z - 34) < 1.0)
-            out = np.where(stud[:, None] | band[:, None], studs, out)
-            out = np.where(seam[:, None], leaf * 0.55, out)
-            return out, None
-        m.box(8, yb - 3, z0, W - 8, yb - 1, z0 + 40, I.flat('#3a2268'), south=leaves)
+            panel = (np.abs((np.abs(x - cx) % 6.5) - 3.25) < 2.4) & (np.abs((z % 9) - 4.5) < 3.2)
+            out = np.where(panel[:, None], leaf * 1.15, out)
+            stud = (np.abs((x - 4) % 6.5 - 3.25) < 0.7) & (np.abs(z % 9 - 0.6) < 0.7)
+            out = np.where(stud[:, None], studs, out)
+            return np.clip(out, 0, 255), None
+        opening(leaves)
+        # light glowing through the seam between the doors
+        m.box(cx - 0.5, yb - 0.4, z0 + 1, cx + 0.5, yb + 0.2, zs + r + 1, I.glow('#ffe9a8'))
     with I.camera(0):
         return _r(m, 'hall_gate_open' if open_ else 'hall_gate', (0, 2 * T, 0), cast=False, shadow_alpha=0, margin=2)
 

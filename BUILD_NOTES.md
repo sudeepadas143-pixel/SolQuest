@@ -481,6 +481,23 @@ same level for Cooker.
   leaves and petals; fireflies (through the light pass) and lamp moths at
   night; birdsong by day and crickets by night. View-culled and capped.
 
+### Battle feel, settings, art pass
+
+- **Battles**: a wind-up before every move; physical moves lunge, special
+  moves throw a glowing orb, status moves raise an aura. Hits flash white for
+  a beat (hit-stop), knock the target back, throw sparks and float the damage
+  up (gold with ! on a critical); shake scales with the hit. Info boxes jolt,
+  low HP pulses red, faints sag and puff dust.
+- **Settings** (pause menu and title): music and sound-effect volume (0-10),
+  text speed (slow / normal / fast), sound on/off. `systems/settings.js`,
+  `ui/Settings.js`; kept per browser.
+- **Art**: Professor Mia is resampled at twice the density and shown 1:1
+  (thinner outline, crisper face, closer to the other portraits). The Hall
+  gate is an arched gateway: marble columns, a gilded arch and keystone, the
+  Sol mark; light glows through the closed doors' seam.
+- **Rough edges**: the boss reveal no longer zooms (pixel art shimmers at
+  in-between zooms); a small "Saved" mark shows on every save.
+
 ## 8. Engineering notes
 
 - **Phones.** The page blocks double-tap zoom, pinch zoom, the long-press
