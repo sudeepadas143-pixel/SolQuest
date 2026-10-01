@@ -80,7 +80,7 @@ await shot('07_wallet');
 await p.mouse.click(...(await at(480, 588)));                // CONFIRM with nothing typed -> required
 await sleep(500);
 await shot('08_wallet_required');
-await p.fill('input.er-input', 'mouseonly123');
+await p.fill('input.er-input', '4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T');
 await p.mouse.click(...(await at(480, 588)));
 await until('Overworld', null, 15000);
 await sleep(1800);

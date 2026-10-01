@@ -13,7 +13,7 @@ await p.goto(process.env.URL ?? 'http://localhost:4173/');
 await p.waitForFunction(() => window.__game?.scene.isActive('Title'));
 await p.evaluate(() => { localStorage.clear(); window.__game.scene.getScene('Title').scene.start('Wallet', { name: 'KAI', gender: 'boy', starter: 'emby' }); });
 await p.waitForFunction(() => window.__game.scene.isActive('Wallet'));
-await p.keyboard.type('shotwallet123');
+await p.keyboard.type('9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM');
 await p.keyboard.press('Enter');
 await p.waitForFunction(() => window.__game.scene.isActive('Overworld'));
 await p.waitForTimeout(1500);

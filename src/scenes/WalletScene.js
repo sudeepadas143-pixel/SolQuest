@@ -11,8 +11,9 @@ import { domInput, fadeTo, tapButton } from '../ui/helpers.js';
 import { pushFocus } from '../systems/controls.js';
 import { sfx } from '../systems/audio.js';
 
+/** Payouts are paid in SOL, so the address must be a Solana one (base58, 32-44 characters). */
 export function validWallet(v) {
-  return v.length >= 4 && v.length <= 128 && !/\s/.test(v);
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v);
 }
 
 export class WalletScene extends Phaser.Scene {
@@ -43,7 +44,7 @@ export class WalletScene extends Phaser.Scene {
     const v = this.input_.value().trim();
     if (!validWallet(v)) {
       sfx('bump');
-      this.err.setText(v ? 'That address looks invalid (no spaces, 4-128 characters).' : 'A wallet address is required to play.');
+      this.err.setText(v ? 'That is not a Solana wallet address - check it and try again.' : 'A wallet address is required to play.');
       this.tweens.add({ targets: this.input_.dom, x: GAME_W / 2 + 8, duration: 50, yoyo: true, repeat: 3, onComplete: () => this.input_.dom.setX(GAME_W / 2) });
       this.input_.el.focus();
       return;

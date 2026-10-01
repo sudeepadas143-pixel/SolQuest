@@ -10,7 +10,7 @@ await p.goto('http://localhost:4173/');
 await p.waitForFunction(() => window.__game?.scene.isActive('Title'));
 await p.evaluate(() => { localStorage.clear(); window.__game.scene.getScene('Title').scene.start('Wallet', { name: 'KAI', gender: 'boy', starter: 'emby' }); });
 await p.waitForTimeout(600);
-await p.keyboard.type('mobilewallet1'); await p.keyboard.press('Enter');
+await p.keyboard.type('HN7cABqLq46Es1jh92dQQisAq662SmxELLLsHHe4YWrH'); await p.keyboard.press('Enter');
 await p.waitForFunction(() => window.__game.scene.isActive('Overworld'));
 await p.waitForTimeout(1200);
 const box = async (act) => p.locator(`#touchpad [data-act=${act}]`).boundingBox();

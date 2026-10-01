@@ -13,7 +13,7 @@ export const INTRO_SCRIPT = [
   "{PLAYER_NAME}! Love it. Now let's get a good look at you.",
 ];
 
-export const WALLET_PROMPT = 'Paste your wallet address. If your clear qualifies, this is where your payout is sent.';
+export const WALLET_PROMPT = 'Paste your Solana wallet address. If your clear qualifies, this is where your payout is sent.';
 
 export const LOOK_PROMPT = 'Which Trainer are you?';
 export const STARTER_PROMPT = 'Choose your partner. This choice is final.';

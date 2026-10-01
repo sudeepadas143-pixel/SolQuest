@@ -13,6 +13,7 @@ import { DialogBox } from '../ui/DialogBox.js';
 import { panel, text } from '../ui/theme.js';
 import { fadeTo, yesNo } from '../ui/helpers.js';
 import { openSettings } from '../ui/Settings.js';
+import { communityStrip, openCommunity } from '../ui/Community.js';
 
 const VIDEO = `${import.meta.env.BASE_URL}assets/title/drone`;
 
@@ -84,6 +85,8 @@ export class TitleScene extends Phaser.Scene {
       this.tweens.add({ targets: this.promptChip, alpha: 0.45, duration: 700, yoyo: true, repeat: -1 });
     } });
     text(this, GAME_W - 16, GAME_H - 22, 'N: sound on/off', 14, '#fff7e6').setOrigin(1, 0).setAlpha(0.6);
+    // X and the contract address, always one click away
+    communityStrip(this);
 
     let started = false;
     const go = () => {
@@ -100,13 +103,29 @@ export class TitleScene extends Phaser.Scene {
 
   async openMenu() {
     const saved = hasSave();
-    const items = saved ? [{ label: 'CONTINUE' }, { label: 'NEW GAME' }, { label: 'SETTINGS' }] : [{ label: 'NEW GAME' }, { label: 'SETTINGS' }];
-    const h = saved ? 190 : 140;
+    const items = [
+      ...(saved ? [{ label: 'CONTINUE' }] : []),
+      { label: 'NEW GAME' }, { label: 'LEADERBOARD' }, { label: 'EARNINGS' }, { label: 'COMMUNITY' }, { label: 'SETTINGS' },
+    ];
+    const h = 40 + items.length * 44;
     const i = await chooseFrom(this, {
-      x: GAME_W / 2 - 160, y: GAME_H - 64 - h, w: 320, h, items, cancelable: false,
+      x: GAME_W / 2 - 160, y: GAME_H - 64 - h, w: 320, h, items, cancelable: false, size: 24, start: this.menuIndex ?? 0,
     });
     const choice = items[i].label;
+    this.menuIndex = i;
     if (choice === 'SETTINGS') { await openSettings(this); this.openMenu(); return; }
+    if (choice === 'COMMUNITY') { await openCommunity(this); this.openMenu(); return; }
+    if (choice === 'LEADERBOARD' || choice === 'EARNINGS') {
+      // the boards open over the title (the footage keeps playing behind)
+      const key = choice === 'LEADERBOARD' ? 'Leaderboard' : 'Earnings';
+      this.input.enabled = false;
+      this.scene.launch(key, { from: 'Title' });
+      this.scene.get(key).events.once('shutdown', () => {
+        this.input.enabled = true;
+        this.openMenu();
+      });
+      return;
+    }
     if (choice === 'CONTINUE') {
       const s = loadSave();
       if (s) { fadeTo(this, 'Overworld'); return; }

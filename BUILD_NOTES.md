@@ -113,6 +113,46 @@ You told me the airdrop comes out of creator fees and goes to the players who
 Until then, treat the leaderboard as unverified and check the top runs by hand
 (ask for a recording) before paying out.
 
+## 3c. Leaderboard and earnings (built) ⚠️
+
+The menu now has **LEADERBOARD** (the season's fastest clears) and **EARNINGS**
+(a wallet's rank, best time, projected payout and the payouts it has received).
+Both are backed by `api/`, Vercel functions over Upstash Redis.
+
+**Runs**
+- A run is sent automatically when Cooker falls; the Hall of Fame shows the rank.
+- If the browser was offline then, it is sent again when LEADERBOARD or EARNINGS opens.
+- The server keeps each wallet's best time.
+
+**Checks on every run**
+- The wallet must be a Solana address. The game now asks for one at the profile screen.
+- The time can't be under the season minimum (5 minutes by default).
+- In-game time can't exceed the wall-clock time between start and finish.
+- Nothing can finish in the future.
+- At most 10 submissions a minute per IP.
+- The season must be open.
+
+**Review**
+- Every run starts as **PENDING**.
+- From `/admin.html` (needs `ADMIN_KEY`) you:
+  - **verify** a run;
+  - **reject** it: it leaves the board and the player sees the reason;
+  - **ban** a wallet for the season;
+  - **record payouts**: amount, place, transaction signature, shown to the player with a Solscan link.
+- **Projected payouts** follow the season's pool and split:
+  - the default split is 30 / 20 / 12 / 9 / 7 / 6 / 5 / 4 / 4 / 3 % for the top 10;
+  - a pool of 0 shows "to be announced".
+- **New season:** change the season id. That starts an empty board, and payout history stays with each wallet.
+
+**Still true from §3 / §3b:** times are reported by the browser, and the checks
+above stop casual tampering, not a determined forger. The PENDING → VERIFIED step
+is where a person confirms the top runs (ask for a recording) before paying. The
+seeded-teams and starter-balance questions in §3b decide how fair the race is.
+
+**Not included**
+- Automatic payouts: payments are sent from your own wallet, then recorded.
+- Signed wallet login (§2).
+
 ## 4. Decisions still open (yours to make)
 
 - **Cooker's likeness sign-off.** Cooker is a real person's character. Get sign-off

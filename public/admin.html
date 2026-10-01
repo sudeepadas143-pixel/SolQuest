@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>SolQuest Admin</title>
+<style>
+  :root { --bg: #0e0b1f; --panel: #19153a; --line: #2e2860; --ink: #f3efff; --muted: #a8acd6; --mint: #2ef2a8; --gold: #ffc94a; --red: #ff6b7a; --violet: #9945ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; } h1 span { color: var(--violet); }
+  h2 { font-size: 16px; margin: 0 0 12px; color: var(--gold); }
+  p.note { color: var(--muted); margin: 0 0 20px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  input, select { width: 100%; background: #0c0a1c; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
+  input:focus { outline: 2px solid var(--violet); border-color: transparent; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); align-items: end; }
+  button { background: var(--violet); color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--ink); }
+  button.ok { background: #138a5f; } button.bad { background: #a8324a; } button.small { padding: 4px 8px; font-size: 12px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td.mono, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; font-weight: 700; }
+  .pending { background: #4a3d10; color: var(--gold); } .verified { background: #0f3d2c; color: var(--mint); } .rejected { background: #4a1420; color: var(--red); }
+  #msg { position: fixed; right: 16px; bottom: 16px; max-width: 420px; padding: 10px 14px; border-radius: 10px; background: #0f3d2c; color: var(--mint); display: none; }
+  #msg.err { background: #4a1420; color: var(--red); }
+  .scroll { overflow-x: auto; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>SolQuest <span>Admin</span></h1>
+  <p class="note">Review leaderboard runs, set the season and prize pool, and record payouts. Players see the results in the game's LEADERBOARD and EARNINGS screens.</p>
+
+  <section>
+    <h2>Admin key</h2>
+    <div class="row">
+      <input id="key" type="password" placeholder="ADMIN_KEY from the Vercel project settings" style="max-width:420px" autocomplete="off">
+      <button id="unlock">Unlock</button>
+      <span class="muted" id="who"></span>
+    </div>
+  </section>
+
+  <div id="app" hidden>
+    <section>
+      <h2>Season and prize pool</h2>
+      <div class="grid">
+        <div><label>Season id (new id = new empty board)</label><input id="c-season"></div>
+        <div><label>Season name</label><input id="c-name"></div>
+        <div><label>Prize pool (SOL)</label><input id="c-pool" type="number" min="0" step="0.01"></div>
+        <div><label>Split % for 1st, 2nd, ... (comma separated)</label><input id="c-splits"></div>
+        <div><label>Ends (local time, optional)</label><input id="c-ends" type="datetime-local"></div>
+        <div><label>Accepting runs</label><select id="c-open"><option value="1">Open</option><option value="0">Closed</option></select></div>
+        <div><label>Fastest possible clear (minutes)</label><input id="c-min" type="number" min="0" step="0.5"></div>
+        <div><button id="save-cfg">Save season</button></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">Runs</h2><button class="ghost" id="reload">Reload</button></div>
+      <p class="muted" style="margin:8px 0 12px">Runs come from players' browsers and can be forged. Before paying, ask the top runners for a recording and verify their run here. Rejected runs leave the board; banned wallets cannot re-enter this season.</p>
+      <div class="scroll"><table>
+        <thead><tr><th>#</th><th>Trainer</th><th>Wallet</th><th>Time</th><th>Partner</th><th>Status</th><th>Submitted</th><th></th></tr></thead>
+        <tbody id="runs"></tbody>
+      </table></div>
+    </section>
+
+    <section>
+      <h2>Record a payout</h2>
+      <div class="grid">
+        <div style="grid-column: span 2"><label>Wallet</label><input id="p-wallet" class="mono"></div>
+        <div><label>Amount (SOL)</label><input id="p-amount" type="number" min="0" step="0.0001"></div>
+        <div><label>Place (optional)</label><input id="p-rank" type="number" min="1"></div>
+        <div style="grid-column: span 2"><label>Transaction signature (optional, links on Solscan)</label><input id="p-tx" class="mono"></div>
+        <div><label>Note (optional)</label><input id="p-note"></div>
+        <div><button id="pay">Record payout</button></div>
+      </div>
+      <h2 style="margin-top:20px">Payouts for a wallet</h2>
+      <div class="row"><input id="h-wallet" class="mono" placeholder="wallet address" style="max-width:520px"><button class="ghost" id="history">Look up</button></div>
+      <div class="scroll"><table style="margin-top:10px">
+        <thead><tr><th>Date</th><th>Season</th><th>Place</th><th>Amount</th><th>Transaction</th><th>Note</th><th></th></tr></thead>
+        <tbody id="pays"></tbody>
+      </table></div>
+    </section>
+  </div>
+  <div id="msg"></div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}.${Math.floor((ms % 1000) / 100)}`; };
+  let key = '';
+  try { key = sessionStorage.getItem('sq-admin') || ''; } catch {}
+  $('key').value = key;
+
+  function toast(text, bad = false) {
+    const m = $('msg'); m.textContent = text; m.className = bad ? 'err' : ''; m.style.display = 'block';
+    clearTimeout(toast.t); toast.t = setTimeout(() => { m.style.display = 'none'; }, 3500);
+  }
+  async function call(action, extra = {}) {
+    const r = await fetch('/api/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, action, ...extra }) });
+    let j = {}; try { j = await r.json(); } catch {}
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    return j;
+  }
+
+  async function unlock() {
+    key = $('key').value.trim();
+    try {
+      const { config } = await call('config');
+      try { sessionStorage.setItem('sq-admin', key); } catch {}
+      $('app').hidden = false; $('who').textContent = 'Unlocked';
+      fillConfig(config); loadRuns();
+    } catch (e) { toast(e.message, true); }
+  }
+  function fillConfig(c) {
+    $('c-season').value = c.season; $('c-name').value = c.seasonName; $('c-pool').value = c.poolSol;
+    $('c-splits').value = c.splits.join(', '); $('c-open').value = c.open ? '1' : '0'; $('c-min').value = c.minClearMs / 60000;
+    $('c-ends').value = c.endsAt ? new Date(new Date(c.endsAt).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '';
+  }
+  async function saveConfig() {
+    try {
+      const { config } = await call('setConfig', { config: {
+        season: $('c-season').value.trim(), seasonName: $('c-name').value.trim(), poolSol: Number($('c-pool').value),
+        splits: $('c-splits').value, endsAt: $('c-ends').value ? new Date($('c-ends').value).toISOString() : null,
+        open: $('c-open').value === '1', minClearMs: Math.round(Number($('c-min').value) * 60000),
+      } });
+      fillConfig(config); toast('Season saved'); loadRuns();
+    } catch (e) { toast(e.message, true); }
+  }
+  async function loadRuns() {
+    try {
+      const { runs, season } = await call('runs');
+      $('runs').innerHTML = runs.length ? runs.map((r) => `<tr>
+        <td>${r.rank ?? '–'}</td><td>${esc(r.name)}</td>
+        <td class="mono">${esc(r.wallet)}</td><td>${fmt(r.clearMs)}</td><td>${esc(r.starter ?? '')}</td>
+        <td><span class="tag ${esc(r.status)}">${esc(r.status)}</span>${r.note ? `<div class="muted">${esc(r.note)}</div>` : ''}</td>
+        <td class="muted">${new Date(r.submittedAt).toLocaleString()}<div>started ${new Date(r.startedAt).toLocaleString()}</div></td>
+        <td><div class="row">
+          <button class="small ok" data-act="verify" data-w="${esc(r.wallet)}">Verify</button>
+          <button class="small bad" data-act="reject" data-w="${esc(r.wallet)}">Reject</button>
+          <button class="small ghost" data-act="ban" data-w="${esc(r.wallet)}">Ban</button>
+          <button class="small ghost" data-act="paywith" data-w="${esc(r.wallet)}" data-r="${r.rank ?? ''}">Pay…</button>
+        </div></td></tr>`).join('') : `<tr><td colspan="8" class="muted">No runs in ${esc(season)} yet.</td></tr>`;
+    } catch (e) { toast(e.message, true); }
+  }
+  $('runs').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('button'); if (!b) return;
+    const wallet = b.dataset.w; const act = b.dataset.act;
+    if (act === 'paywith') { $('p-wallet').value = wallet; $('p-rank').value = b.dataset.r; $('p-amount').focus(); return; }
+    let note = '';
+    if (act !== 'verify') { note = prompt(`${act === 'ban' ? 'Ban' : 'Reject'} ${wallet}\nReason (the player sees it for a rejection):`) ?? null; if (note === null) return; }
+    try { await call(act, { wallet, note }); toast(`${act} done`); loadRuns(); } catch (e) { toast(e.message, true); }
+  });
+  async function pay() {
+    try {
+      await call('pay', { wallet: $('p-wallet').value.trim(), amountSol: Number($('p-amount').value), tx: $('p-tx').value.trim(), rank: Number($('p-rank').value) || null, note: $('p-note').value.trim() });
+      toast('Payout recorded'); $('h-wallet').value = $('p-wallet').value.trim(); history();
+      ['p-amount', 'p-tx', 'p-note', 'p-rank'].forEach((id) => { $(id).value = ''; });
+    } catch (e) { toast(e.message, true); }
+  }
+  async function history() {
+    const wallet = $('h-wallet').value.trim();
+    try {
+      const r = await fetch(`/api/player?wallet=${encodeURIComponent(wallet)}`); const j = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      $('pays').innerHTML = j.payouts.length ? j.payouts.map((p) => `<tr><td>${new Date(p.at).toLocaleString()}</td><td>${esc(p.season)}</td><td>${p.rank ?? ''}</td>
+        <td>${p.amountSol} SOL</td><td class="mono">${p.tx ? `<a style="color:var(--mint)" href="https://solscan.io/tx/${esc(p.tx)}" target="_blank" rel="noopener">${esc(p.tx.slice(0, 16))}…</a>` : '<span class="muted">none</span>'}</td>
+        <td>${esc(p.note)}</td><td><button class="small bad" data-id="${esc(p.id)}">Remove</button></td></tr>`).join('')
+        + `<tr><td colspan="3"><b>Total</b></td><td><b>${j.totalPaidSol} SOL</b></td><td colspan="3"></td></tr>` : '<tr><td colspan="7" class="muted">No payouts for this wallet.</td></tr>';
+    } catch (e) { toast(e.message, true); }
+  }
+  $('pays').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('button'); if (!b || !confirm('Remove this payout record?')) return;
+    try { await call('unpay', { wallet: $('h-wallet').value.trim(), id: b.dataset.id }); toast('Removed'); history(); } catch (e) { toast(e.message, true); }
+  });
+  $('unlock').onclick = unlock; $('key').onkeydown = (e) => { if (e.key === 'Enter') unlock(); };
+  $('save-cfg').onclick = saveConfig; $('reload').onclick = loadRuns; $('pay').onclick = pay; $('history').onclick = history;
+  if (key) unlock();
+</script>
+</body>
+</html>

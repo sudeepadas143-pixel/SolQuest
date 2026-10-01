@@ -27,6 +27,7 @@ import { wait, tween } from '../ui/helpers.js';
 import { used } from '../systems/hints.js';
 import { Ambient } from './ambient.js';
 import { Townsfolk } from './townsfolk.js';
+import { submitClear } from '../systems/leaderboard.js';
 
 const DELTA = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
@@ -1196,6 +1197,8 @@ export class OverworldScene extends Phaser.Scene {
           playMs: s.stats.playMs,
         };
         writeSave();
+        // up to the leaderboard straight away (the Hall of Fame shows how it landed)
+        this.registry.set('clearSubmission', submitClear(s));
         this.ui.refreshHud();
         done?.();
         this.goHallOfFame();

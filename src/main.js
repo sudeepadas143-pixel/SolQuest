@@ -17,6 +17,8 @@ import { unlockAudio } from './systems/audio.js';
 import { BattleScene } from './scenes/BattleScene.js';
 import { EvolutionScene } from './scenes/EvolutionScene.js';
 import { HallOfFameScene } from './scenes/HallOfFameScene.js';
+import { LeaderboardScene } from './scenes/LeaderboardScene.js';
+import { EarningsScene } from './scenes/EarningsScene.js';
 
 // Pixelify Sans has broken "fi"/"fl" ligature glyphs on canvas ("final" renders
 // as "Anal"). Break f-ligatures with a zero-width non-joiner on every Text.
@@ -45,7 +47,8 @@ async function start() {
     dom: { createContainer: true },
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     scene: [BootScene, TitleScene, IntroScene, LookScene, StarterScene, WalletScene,
-      OverworldScene, AtmosphereScene, OverworldUIScene, BattleScene, EvolutionScene, HallOfFameScene],
+      OverworldScene, AtmosphereScene, OverworldUIScene, BattleScene, EvolutionScene, HallOfFameScene,
+      LeaderboardScene, EarningsScene],
   });
   installRunClock(game);
   // browsers only allow audio after a user gesture

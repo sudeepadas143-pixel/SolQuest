@@ -13,6 +13,7 @@ import { formatRun } from '../systems/world.js';
 import { music, sfx } from '../systems/audio.js';
 import { typeBadge } from '../ui/Summary.js';
 import { fadeTo, waitContinue } from '../ui/helpers.js';
+import { clearSubmitted, submitClear } from '../systems/leaderboard.js';
 
 export class HallOfFameScene extends Phaser.Scene {
   constructor() { super('HallOfFame'); }
@@ -87,8 +88,16 @@ export class HallOfFameScene extends Phaser.Scene {
     text(this, GAME_W - 310, 588, `Items found: ${s.pickedItems?.length ?? 0}`, 16, '#a8acd6');
 
     const w = s.player.wallet;
-    panel(this, 16, 206, 264, 66, 'chip').setDepth(55);
+    panel(this, 16, 206, 264, 104, 'chip').setDepth(55);
     text(this, 30, 216, w ? `PAYOUT WALLET\n${w.slice(0, 6)}…${w.slice(-4)}` : 'NO WALLET ON FILE\nAdd one in MENU > PROFILE', 17, w ? '#2ef2a8' : '#ff8a8a', { lineSpacing: 6 }).setDepth(56);
+    // the leaderboard: the run goes up as Cooker falls; this shows how it landed
+    const lb = text(this, 30, 270, 'LEADERBOARD: sending…', 15, '#ffc94a', { wordWrap: { width: 240 } }).setDepth(56);
+    const showRank = (res) => {
+      if (!this.sys.isActive()) return;
+      if (res?.ok) lb.setText(`LEADERBOARD: #${res.rank}${res.best === false ? ' (your best stands)' : ''} - pending review`).setColor('#2ef2a8');
+      else lb.setText(`LEADERBOARD: not sent - ${res?.error ?? 'offline'}`).setColor('#ff8a8a');
+    };
+    (this.registry.get('clearSubmission') ?? (clearSubmitted(s) ? Promise.resolve({ ok: true, rank: s.run.submitted.rank }) : submitClear(s))).then(showRank);
 
     // confetti
     const colors = [0x9945ff, 0x14f195, 0xecbc48, 0xfbf6e9, 0xee4f4b];

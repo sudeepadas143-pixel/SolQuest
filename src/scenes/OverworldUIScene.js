@@ -499,7 +499,7 @@ export class OverworldUIScene extends Phaser.Scene {
       const close = () => { release(); inp.destroy(); bg.destroy(); lbl.destroy(); err.destroy(); btns.forEach((b) => b.destroy()); resolve(); };
       const save = () => {
         const v = inp.value().trim();
-        if (!validWallet(v)) { sfx('bump'); err.setText(v ? 'That address looks invalid (no spaces, 4-128 characters).' : 'A wallet address is required.').setColor('#ff6b7a'); return; }
+        if (!validWallet(v)) { sfx('bump'); err.setText(v ? 'That is not a Solana wallet address - check it and try again.' : 'A wallet address is required.').setColor('#ff6b7a'); return; }
         s.player.wallet = v;
         writeSave();
         close();

@@ -76,6 +76,7 @@ export function createSave({ name, gender, starter, wallet }) {
     seed,
     seedSource,
     player: { name, gender, wallet: normalizeWallet(wallet), walletAtSeed: normalizeWallet(wallet) },
+    starter,                     // the species picked (the leaderboard shows it)
     party: [createCreature(starter, 5, starterRng, { ivFloor: 16 })],
     bag: { ...STARTING_BAG },
     pos: { ...PLAYER_START },

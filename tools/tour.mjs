@@ -18,7 +18,7 @@ await p.evaluate(() => { localStorage.clear(); window.__game.scene.getScene('Tit
 await p.waitForFunction(() => window.__game.scene.isActive('Wallet'));
 await p.waitForTimeout(700);
 await p.screenshot({ path: `${OUT}/01_wallet.png` });
-await p.keyboard.type('tourwallet123');
+await p.keyboard.type('So11111111111111111111111111111111111111112');
 await p.keyboard.press('Enter');
 await p.waitForFunction(() => window.__game.scene.isActive('Overworld'));
 await p.waitForTimeout(1500);
