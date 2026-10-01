@@ -30,6 +30,7 @@ const LEGEND = {
   click: ['CLICK', 'Walk there / use it'],
 };
 import { runEvolution } from './EvolutionScene.js';
+import { openSettings } from '../ui/Settings.js';
 import { validWallet } from './WalletScene.js';
 import { WALLET_PROMPT } from '../data/dialogue.js';
 
@@ -366,13 +367,13 @@ export class OverworldUIScene extends Phaser.Scene {
     for (;;) {
       const i = await chooseFrom(this, {
         x: GAME_W - 280, y: 150, w: 260, h: 380, start: last,
-        items: [{ label: 'TEAM' }, { label: 'BAG' }, { label: 'PROFILE' }, { label: isMuted() ? 'SOUND: OFF' : 'SOUND: ON' }, { label: 'SAVE' }, { label: 'CLOSE' }],
+        items: [{ label: 'TEAM' }, { label: 'BAG' }, { label: 'PROFILE' }, { label: 'SETTINGS' }, { label: 'SAVE' }, { label: 'CLOSE' }],
       });
       if (i >= 0) last = i;
       if (i === 0) await showSummary(this, s.party[0]);
       else if (i === 1) await this.bagMenu();
       else if (i === 2) await this.profile();
-      else if (i === 3) this.toggleSound();
+      else if (i === 3) await openSettings(this);
       else if (i === 4) { writeSave(); sfx('save'); await this.say('Your progress was saved.'); }
       else return;
     }

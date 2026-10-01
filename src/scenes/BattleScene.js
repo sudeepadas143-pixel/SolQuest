@@ -637,56 +637,131 @@ export class BattleScene extends Phaser.Scene {
 
   spriteOf(side) { return side === 'player' ? this.meSprite : this.foeSprite; }
 
-  async animAttack(e) {
-    const s = this.spriteOf(e.side);
-    if (e.category === 'status') {
-      sfx('status');
-      s.setTint(0xfff3a0);
-      await wait(this, 180);
-      s.clearTint();
-      if (this.nightTint) s.setTint(this.nightTint);
-      return;
-    }
-    sfx('attack');
-    const dx = e.side === 'player' ? 40 : -40;
-    const dy = e.side === 'player' ? -16 : 12;
-    await tween(this, { targets: s, x: s.x + dx, y: s.y + dy, duration: 110, yoyo: true, ease: 'Quad.easeOut' });
-    const target = this.spriteOf(e.side === 'player' ? 'foe' : 'player');
-    const m = target.getWorldTransformMatrix();
-    const cx = m.tx;
-    const cy = m.ty - target.displayHeight * 0.45;
-    const color = TYPE_COLORS[e.moveType] ?? 0xffffff;
-    const ring = this.add.circle(cx, cy, 20, color, 0).setStrokeStyle(6, color, 0.9).setDepth(6);
-    this.tweens.add({ targets: ring, scale: 3.2, alpha: 0, duration: 360, onComplete: () => ring.destroy() });
-    for (let i = 0; i < 9; i++) {
-      const c = this.add.circle(cx, cy, 9, color, 0.95).setDepth(6);
-      const a = (i / 9) * Math.PI * 2;
-      this.tweens.add({ targets: c, x: cx + Math.cos(a) * 80, y: cy + Math.sin(a) * 56, scale: 0.2, alpha: 0, duration: 340, onComplete: () => c.destroy() });
-    }
-    await wait(this, 120);
+  /** Centre of a battler on screen (it lives inside its platform's container). */
+  centreOf(sprite) {
+    const m = sprite.getWorldTransformMatrix();
+    return { x: m.tx, y: m.ty - sprite.displayHeight * 0.45 };
   }
 
+  restoreTint(s) {
+    s.clearTint();
+    if (this.nightTint) s.setTint(this.nightTint);
+  }
+
+  /** Wind-up, then a lunge (physical) or an orb thrown across the field
+   *  (special); status moves raise an aura. Ends with a burst on the target. */
+  async animAttack(e) {
+    const s = this.spriteOf(e.side);
+    const target = this.spriteOf(e.side === 'player' ? 'foe' : 'player');
+    const color = TYPE_COLORS[e.moveType] ?? 0xffffff;
+    const home = { x: 0, y: e.side === 'player' ? 44 : 8 };
+    const dir = e.side === 'player' ? 1 : -1;
+    if (e.category === 'status') {
+      sfx('status');
+      const c = this.centreOf(s);
+      const aura = this.add.image(c.x, c.y, 'glow').setBlendMode(Phaser.BlendModes.ADD).setTint(color).setScale(0.6).setAlpha(0).setDepth(6);
+      this.tweens.add({ targets: aura, alpha: 0.85, scale: 2.4, duration: 260, yoyo: true, onComplete: () => aura.destroy() });
+      s.setTint(0xfff3a0);
+      await tween(this, { targets: s, y: home.y - 10, duration: 130, yoyo: true, ease: 'Sine.easeOut' });
+      this.restoreTint(s);
+      return;
+    }
+    // anticipation: draw back a little
+    await tween(this, { targets: s, x: home.x - dir * 12, y: home.y + dir * 5, duration: 110, ease: 'Sine.easeOut' });
+    sfx('attack');
+    const to = this.centreOf(target);
+    if (e.category === 'special') {
+      const from = this.centreOf(s);
+      const orb = this.add.image(from.x, from.y, 'glow').setBlendMode(Phaser.BlendModes.ADD).setTint(color).setScale(0.5).setDepth(6);
+      const core = this.add.image(from.x, from.y, 'spark').setBlendMode(Phaser.BlendModes.ADD).setScale(0.35).setDepth(6.1);
+      const trail = this.add.particles(0, 0, 'spark', {
+        follow: orb, lifespan: 260, scale: { start: 0.22, end: 0 }, alpha: { start: 0.9, end: 0 }, tint: color,
+        blendMode: 'ADD', frequency: 14,
+      }).setDepth(5.9);
+      this.tweens.add({ targets: s, x: home.x + dir * 10, y: home.y - dir * 4, duration: 120, yoyo: true, onComplete: () => s.setPosition(home.x, home.y) });
+      await tween(this, { targets: [orb, core], x: to.x, y: to.y, scale: '+=0.25', duration: 300, ease: 'Quad.easeIn' });
+      trail.stop();
+      this.time.delayedCall(300, () => trail.destroy());
+      orb.destroy(); core.destroy();
+    } else {
+      // the lunge
+      await tween(this, { targets: s, x: home.x + dir * 54, y: home.y - dir * 20, duration: 100, ease: 'Quad.easeIn' });
+      this.tweens.add({ targets: s, x: home.x, y: home.y, duration: 220, ease: 'Quad.easeOut' });
+    }
+    const ring = this.add.circle(to.x, to.y, 20, color, 0).setStrokeStyle(6, color, 0.9).setDepth(6);
+    this.tweens.add({ targets: ring, scale: 3.2, alpha: 0, duration: 360, onComplete: () => ring.destroy() });
+    for (let i = 0; i < 9; i++) {
+      const c = this.add.circle(to.x, to.y, 9, color, 0.95).setDepth(6);
+      const a = (i / 9) * Math.PI * 2;
+      this.tweens.add({ targets: c, x: to.x + Math.cos(a) * 80, y: to.y + Math.sin(a) * 56, scale: 0.2, alpha: 0, duration: 340, onComplete: () => c.destroy() });
+    }
+    await wait(this, 60);
+  }
+
+  /** The hit lands: a white flash and a beat of stillness, knockback, sparks,
+   *  the damage floating up, a shake that matches how hard it was. */
   async animHit(e) {
     const s = this.spriteOf(e.side);
+    const big = e.eff > 1 || e.crit;
+    const home = { x: 0, y: e.side === 'player' ? 44 : 8 };
+    const away = e.side === 'player' ? -1 : 1;
     sfx(e.eff > 1 ? 'superHit' : e.eff < 1 ? 'weakHit' : 'hit');
-    if (e.eff > 1) this.cameras.main.shake(200, 0.01);
-    for (let i = 0; i < 4; i++) {
-      s.setAlpha(0.15);
-      await wait(this, 60);
-      s.setAlpha(1);
-      await wait(this, 60);
+    s.setTintFill(0xffffff);
+    this.cameras.main.shake(big ? 260 : 130, big ? 0.013 : 0.0045);
+    const c = this.centreOf(s);
+    for (let i = 0; i < (big ? 12 : 7); i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 40 + Math.random() * (big ? 60 : 36);
+      const sp = this.add.image(c.x, c.y, 'spark').setBlendMode(Phaser.BlendModes.ADD).setScale(big ? 0.3 : 0.22).setDepth(6.2);
+      this.tweens.add({ targets: sp, x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r * 0.7, scale: 0.02, alpha: 0, duration: 320 + Math.random() * 160, ease: 'Cubic.easeOut', onComplete: () => sp.destroy() });
     }
+    if (e.dmg) this.damagePop(c.x, c.y - s.displayHeight * 0.35, e.dmg, e.crit, e.eff);
+    await wait(this, 75);                          // hit-stop
+    this.restoreTint(s);
+    await tween(this, { targets: s, x: home.x + away * (big ? 16 : 9), duration: 60, yoyo: true, repeat: big ? 1 : 0, ease: 'Sine.easeOut' });
+    s.setPosition(home.x, home.y);
+    for (let i = 0; i < 2; i++) {
+      s.setAlpha(0.3);
+      await wait(this, 55);
+      s.setAlpha(1);
+      await wait(this, 55);
+    }
+  }
+
+  /** The damage, floating up off the battler (gold with a ! on a critical). */
+  damagePop(x, y, dmg, crit, eff) {
+    const col = crit ? '#ffd35a' : eff > 1 ? '#ffb07a' : eff < 1 ? '#c8cce8' : '#ffffff';
+    const t = text(this, x, y, `${dmg}${crit ? '!' : ''}`, crit ? 34 : 28, col, { fontStyle: 'bold', stroke: '#12163a', strokeThickness: 6 })
+      .setOrigin(0.5).setDepth(7).setScale(0.6);
+    this.tweens.add({ targets: t, scale: 1, duration: 140, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: t, y: y - 42, duration: 900, ease: 'Sine.easeOut' });
+    this.tweens.add({ targets: t, alpha: 0, delay: 600, duration: 300, onComplete: () => t.destroy() });
   }
 
   async animHp(e) {
+    const box = e.side === 'player' ? this.meBox : this.foeBox;
+    if (e.to < e.from) this.tweens.add({ targets: box, y: 3, duration: 60, yoyo: true, ease: 'Sine.easeOut' });
     if (e.side === 'player') {
       await this.meHp.tweenTo(e.to / e.max, {
         onUpdate: (f) => this.meHpText.setText(`${Math.round(f * e.max)}/ ${e.max}`),
       });
       this.meHpText.setText(`${e.to}/ ${e.max}`);
       if (e.to / e.max <= 0.2 && e.to > 0) sfx('lowHp');
+      this.lowHpPulse(e.to > 0 && e.to / e.max <= 0.2);
     } else {
       await this.foeHp.tweenTo(e.to / e.max);
+    }
+  }
+
+  /** Your HP numbers pulse red while you're in the danger zone. */
+  lowHpPulse(on) {
+    if (on && !this.lowPulse) {
+      this.meHpText.setColor('#d8283c');
+      this.lowPulse = this.tweens.add({ targets: this.meHpText, alpha: 0.45, duration: 420, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    } else if (!on && this.lowPulse) {
+      this.lowPulse.remove();
+      this.lowPulse = null;
+      this.meHpText.setAlpha(1).setColor('#12163a');
     }
   }
 
@@ -707,6 +782,7 @@ export class BattleScene extends Phaser.Scene {
     this.meHpText.setText(`${e.to}/ ${e.max}`);
     this.meSprite.clearTint();
     if (this.nightTint) this.meSprite.setTint(this.nightTint);
+    this.lowHpPulse(e.to > 0 && e.to / e.max <= 0.2);
   }
 
   async animStat(e) {
@@ -721,9 +797,21 @@ export class BattleScene extends Phaser.Scene {
   async animFaint(e) {
     const s = this.spriteOf(e.side);
     const box = e.side === 'player' ? this.meBox : this.foeBox;
+    const sc = s.scaleX;
     sfx('faint');
     this.tweens.killTweensOf(s);
-    await tween(this, { targets: s, y: s.y + 70, alpha: 0, duration: 380, ease: 'Quad.easeIn' });
+    // a last flash, a sag, then down - with a puff of dust from the platform
+    s.setTintFill(0xffffff);
+    await wait(this, 70);
+    this.restoreTint(s);
+    await tween(this, { targets: s, scaleY: sc * 0.86, scaleX: sc * 1.08, duration: 110, ease: 'Sine.easeOut' });
+    const m = s.getWorldTransformMatrix();
+    for (let i = 0; i < 8; i++) {
+      const d = this.add.ellipse(m.tx + (i - 3.5) * 14, m.ty - 4, 18, 10, 0xd8d0e8, 0.6).setDepth(6);
+      this.tweens.add({ targets: d, x: d.x + (i - 3.5) * 8, y: d.y - 12, scale: 1.8, alpha: 0, duration: 520, ease: 'Sine.easeOut', onComplete: () => d.destroy() });
+    }
+    await tween(this, { targets: s, y: s.y + 70, alpha: 0, scaleY: sc * 0.7, duration: 380, ease: 'Quad.easeIn' });
+    s.setScale(sc);
     await tween(this, { targets: box, alpha: 0, duration: 200 });
   }
 

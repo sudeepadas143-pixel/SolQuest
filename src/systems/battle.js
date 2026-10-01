@@ -165,7 +165,7 @@ export class BattleEngine {
       ev.push({ t: 'text', text: `It doesn't affect ${this.label(defSide)}...` });
       return;
     }
-    ev.push({ t: 'hit', side: defSide, eff });
+    ev.push({ t: 'hit', side: defSide, eff, crit, dmg });
     ev.push({ t: 'hp', side: defSide, from, to: def.hp, max: calcStats(def).hp });
     if (crit) ev.push({ t: 'text', text: 'A critical hit!' });
     if (eff > 1) ev.push({ t: 'text', text: "It's super effective!" });

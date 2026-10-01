@@ -12,6 +12,7 @@ import { chooseFrom } from '../ui/Menu.js';
 import { DialogBox } from '../ui/DialogBox.js';
 import { panel, text } from '../ui/theme.js';
 import { fadeTo, yesNo } from '../ui/helpers.js';
+import { openSettings } from '../ui/Settings.js';
 
 const VIDEO = `${import.meta.env.BASE_URL}assets/title/drone`;
 
@@ -99,12 +100,13 @@ export class TitleScene extends Phaser.Scene {
 
   async openMenu() {
     const saved = hasSave();
-    const items = saved ? [{ label: 'CONTINUE' }, { label: 'NEW GAME' }] : [{ label: 'NEW GAME' }];
-    const h = saved ? 140 : 90;
+    const items = saved ? [{ label: 'CONTINUE' }, { label: 'NEW GAME' }, { label: 'SETTINGS' }] : [{ label: 'NEW GAME' }, { label: 'SETTINGS' }];
+    const h = saved ? 190 : 140;
     const i = await chooseFrom(this, {
       x: GAME_W / 2 - 160, y: GAME_H - 64 - h, w: 320, h, items, cancelable: false,
     });
     const choice = items[i].label;
+    if (choice === 'SETTINGS') { await openSettings(this); this.openMenu(); return; }
     if (choice === 'CONTINUE') {
       const s = loadSave();
       if (s) { fadeTo(this, 'Overworld'); return; }

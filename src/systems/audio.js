@@ -1,6 +1,11 @@
 // Procedural audio: every sound effect is synthesised, and the music is a tiny
 // look-ahead step sequencer playing the tracks in data/music.js. No audio files.
 import { TRACKS } from '../data/music.js';
+import { volume, onSetting } from './settings.js';
+
+// bus levels at full volume (the settings scale them)
+const MUSIC_GAIN = 0.55;
+const SFX_GAIN = 0.7;
 
 let ctx = null;
 let master = null;
@@ -36,7 +41,7 @@ export function unlockAudio() {
   master.connect(ctx.destination);
   // music: dry + a soft room reverb, gently low-passed so nothing is shrill
   musicBus = ctx.createGain();
-  musicBus.gain.value = 0.55;
+  musicBus.gain.value = MUSIC_GAIN * volume('music');
   const tame = ctx.createBiquadFilter();
   tame.type = 'lowpass';
   tame.frequency.value = 5200;
@@ -61,7 +66,7 @@ export function unlockAudio() {
   echo.connect(echoLp).connect(fb).connect(echo);
   echoLp.connect(echoOut).connect(musicBus);
   sfxBus = ctx.createGain();
-  sfxBus.gain.value = 0.7;
+  sfxBus.gain.value = SFX_GAIN * volume('sfx');
   const sfxLp = ctx.createBiquadFilter();
   sfxLp.type = 'lowpass';
   sfxLp.frequency.value = 6500;
@@ -84,6 +89,13 @@ function impulse(seconds, decay) {
 }
 
 export function isMuted() { return muted; }
+// volume changes from the settings menu apply at once
+onSetting((k) => {
+  if (!ctx) return;
+  if (k === 'music') musicBus.gain.setTargetAtTime(MUSIC_GAIN * volume('music'), ctx.currentTime, 0.05);
+  if (k === 'sfx') sfxBus.gain.setTargetAtTime(SFX_GAIN * volume('sfx'), ctx.currentTime, 0.05);
+});
+
 export function setMuted(m) {
   muted = m;
   try { localStorage.setItem('eliteRoute.muted', m ? '1' : '0'); } catch { /* ignore */ }

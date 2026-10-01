@@ -2,6 +2,7 @@
 // resolves after the player confirms. Optional speaker name tab on top.
 import { pushFocus } from '../systems/controls.js';
 import { sfx } from '../systems/audio.js';
+import { textFactor } from '../systems/settings.js';
 import { panel, text } from './theme.js';
 import { highlightTexture, badgeTexture, C } from './skin.js';
 
@@ -76,13 +77,17 @@ export class DialogBox {
       const onPointer = () => onAction('confirm');
       release = pushFocus(onAction, this.scene);
       if (wait) this.scene.input.on('pointerdown', onPointer);
+      // text speed (settings): faster than a letter per frame types several per tick
+      const d = this.speed * textFactor();
+      const per = Math.max(1, Math.round(16 / d));
       timer = this.scene.time.addEvent({
-        delay: this.speed,
-        repeat: Math.max(0, str.length - 1),
+        delay: Math.max(16, d),
+        repeat: Math.max(0, Math.ceil(str.length / per) - 1),
         callback: () => {
-          i += 1;
+          const before = i;
+          i = Math.min(str.length, i + per);
           this.text.setText(str.slice(0, i));
-          if (i % 3 === 0 && str[i - 1] !== ' ') sfx('type');
+          if (Math.floor(i / 3) > Math.floor(before / 3) && str[i - 1] !== ' ') sfx('type');
           if (i >= str.length) finishTyping();
         },
       });

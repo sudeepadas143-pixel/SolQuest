@@ -37,8 +37,8 @@ await shot('01_title');
 await p.mouse.click(...(await at(480, 400)));                // start
 await sleep(700);
 await shot('02_menu');
-await p.mouse.click(...(await at(480, 528)));                // NEW GAME
-await until('Intro', await at(480, 528));
+await p.mouse.click(...(await at(480, 482)));                // NEW GAME (first of NEW GAME / SETTINGS)
+await until('Intro', await at(480, 482));
 await sleep(1500);
 await shot('03_intro_mia');
 // click through until the name box appears
