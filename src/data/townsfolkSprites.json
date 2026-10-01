@@ -1,0 +1,147 @@
+{
+  "netkid": {
+    "sheet": "townsfolk/netkid.png",
+    "frameWidth": 67,
+    "frameHeight": 88,
+    "rows": [
+      "down",
+      "left",
+      "right",
+      "up"
+    ],
+    "frames": 7,
+    "walkFrames": [
+      1,
+      0,
+      2,
+      0
+    ],
+    "runFrames": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "head": [
+      6,
+      20,
+      36
+    ]
+  },
+  "capkid": {
+    "sheet": "townsfolk/capkid.png",
+    "frameWidth": 59,
+    "frameHeight": 90,
+    "rows": [
+      "down",
+      "left",
+      "right",
+      "up"
+    ],
+    "frames": 7,
+    "walkFrames": [
+      1,
+      0,
+      2,
+      0
+    ],
+    "runFrames": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "head": [
+      9,
+      6,
+      40
+    ]
+  },
+  "girl": {
+    "sheet": "townsfolk/girl.png",
+    "frameWidth": 53,
+    "frameHeight": 86,
+    "rows": [
+      "down",
+      "left",
+      "right",
+      "up"
+    ],
+    "frames": 7,
+    "walkFrames": [
+      1,
+      0,
+      2,
+      0
+    ],
+    "runFrames": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "head": [
+      7,
+      12,
+      38
+    ]
+  },
+  "gardener": {
+    "sheet": "townsfolk/gardener.png",
+    "frameWidth": 79,
+    "frameHeight": 106,
+    "rows": [
+      "down",
+      "left",
+      "right",
+      "up"
+    ],
+    "frames": 7,
+    "walkFrames": [
+      1,
+      0,
+      2,
+      0
+    ],
+    "runFrames": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "head": [
+      14,
+      14,
+      40
+    ]
+  },
+  "farmer": {
+    "sheet": "townsfolk/farmer.png",
+    "frameWidth": 82,
+    "frameHeight": 110,
+    "rows": [
+      "down",
+      "left",
+      "right",
+      "up"
+    ],
+    "frames": 7,
+    "walkFrames": [
+      1,
+      0,
+      2,
+      0
+    ],
+    "runFrames": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "head": [
+      22,
+      10,
+      38
+    ]
+  }
+}

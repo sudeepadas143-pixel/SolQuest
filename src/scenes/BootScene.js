@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import manifest from '../data/spriteManifest.json' with { type: 'json' };
 import tilesMeta from '../data/tiles.json' with { type: 'json' };
+import townsfolk from '../data/townsfolkSprites.json' with { type: 'json' };
 import { text } from '../ui/theme.js';
 import { GAME_W, GAME_H } from '../config.js';
 import { makeFxTextures } from '../ui/skin.js';
@@ -30,6 +31,9 @@ export class BootScene extends Phaser.Scene {
       this.load.spritesheet(`player_${g}`, `${BASE}sprites/${e.walk}`, { frameWidth: e.frameWidth, frameHeight: e.frameHeight });
       this.load.image(`player_${g}_full`, `${BASE}sprites/${e.full}`);
     }
+    for (const [id, e] of Object.entries(townsfolk)) {
+      this.load.spritesheet(`towns_${id}`, `${BASE}sprites/${e.sheet}`, { frameWidth: e.frameWidth, frameHeight: e.frameHeight });
+    }
     this.load.image('mia_full', `${BASE}sprites/trainers/mia_full.png`);   // Professor Mia (tools/make_mia.py)
     this.load.image('tileset', `${BASE}tiles/tileset.png`);
     // title screen: first frame of the drone flight (the video itself streams in the Title scene)
@@ -48,6 +52,14 @@ export class BootScene extends Phaser.Scene {
     }
     for (const id of Object.keys(manifest.trainers)) {
       this.anims.create({ key: `trainer_${id}_idle`, frames: [0, 0, 0, 1, 1].map((frame) => ({ key: `trainer_${id}_ow`, frame })), frameRate: 3, repeat: -1 });
+    }
+    // townspeople: just the head (a square set in tools/make_townsfolk.py) at the
+    // top of a tall canvas, so the dialogue badge's head finder frames it whole
+    for (const [id, e] of Object.entries(townsfolk)) {
+      const [hx, hy, hs] = e.head;
+      const tex = this.textures.createCanvas(`towns_${id}_face`, hs, Math.ceil(hs / 0.3) + 1);
+      tex.getContext().drawImage(this.textures.get(`towns_${id}`).getSourceImage(), hx, hy, hs, hs, 0, 0, hs, hs);
+      tex.refresh();
     }
     this.registry.set('playerRows', manifest.player.boy.rows);
     this.registry.set('playerFrames', manifest.player.boy.frames);

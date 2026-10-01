@@ -498,6 +498,32 @@ same level for Cooker.
 - **Rough edges**: the boss reveal no longer zooms (pixel art shimmers at
   in-between zooms); a small "Saved" mark shows on every save.
 
+### Townspeople
+
+- Five townspeople from the art sheet `tools/src_art/townsfolk_1.png`:
+  - Rafi (the cap kid) in the start town.
+  - Tilly at the Market Square fountain.
+  - Bram (net) on the Willow Pond bank.
+  - Joss (farmer) by the windmill.
+  - Mr. Alder (gardener) in the Orchard.
+- `tools/make_townsfolk.py` builds the sprites:
+  - It cuts the four views, resamples them, recolours the cap kid's ball to Sol purple/green, and works out which way each side view faces (it can be pinned per character).
+  - It poses walk frames with the simple poser and writes `public/assets/sprites/townsfolk/` plus `src/data/townsfolkSprites.json`.
+  - The badge's head square is also set per character there.
+  - To add more people, add the sheet and an entry in `SHEETS`, then an entry in `src/data/townsfolk.js`.
+- `src/data/townsfolk.js` holds each person's name, home tile, wander patch, conversations (one per talk, in turn) and lines for after Cooker falls.
+- `scenes/townsfolk.js` runs them:
+  - They amble a few tiles at a time and look your way when you come near.
+  - They never step onto your tile, the tile you're stepping into, or the next few tiles of a clicked path.
+  - They avoid tall grass, doorsteps, signs and checkpoints.
+  - They block their tile.
+  - They freeze while anything is open.
+- Talking:
+  - Face one and press confirm, or click them; you walk over and follow if they move.
+  - Walking into them only bumps.
+  - A clicked path re-plans around anyone who wanders across it.
+- `tools/townsfolk_check.mjs` checks talking (key and click), wander bounds and no overlap.
+
 ## 8. Engineering notes
 
 - **Phones.** The page blocks double-tap zoom, pinch zoom, the long-press

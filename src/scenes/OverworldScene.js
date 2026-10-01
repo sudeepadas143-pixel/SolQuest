@@ -26,6 +26,7 @@ import { heldDirection, isHeld, pushFocusToken } from '../systems/controls.js';
 import { wait, tween } from '../ui/helpers.js';
 import { used } from '../systems/hints.js';
 import { Ambient } from './ambient.js';
+import { Townsfolk } from './townsfolk.js';
 
 const DELTA = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
@@ -133,6 +134,8 @@ export class OverworldScene extends Phaser.Scene {
     this.npcAt = new Map();
     this.npcSprites = {};
     for (const [id, spot] of Object.entries(TRAINER_SPOTS)) this.placeTrainer(id, spot);
+    this.stepTo = null;
+    this.townsfolk = new Townsfolk(this);
 
     // player (+ soft contact shadow)
     const { x, y, facing } = this.save.pos;
@@ -309,7 +312,7 @@ export class OverworldScene extends Phaser.Scene {
   walkable(x, y) {
     if (x < 0 || y < 0 || x >= this.map.w || y >= this.map.h) return false;
     const k = this.map.key(x, y);
-    return !this.map.blocked[y][x] && !this.npcAt.has(k) && !this.itemAt.has(k);
+    return !this.map.blocked[y][x] && !this.npcAt.has(k) && !this.itemAt.has(k) && !this.townsfolk?.at.has(k);
   }
 
   /** A step from (x0, y0) to the neighbour (x1, y1): free, and no ledge in between. */
@@ -365,6 +368,7 @@ export class OverworldScene extends Phaser.Scene {
   update(time, delta) {
     if (!this.save) return;
     this.ambient?.update(time, delta);
+    this.townsfolk?.update(time);
     if (!this.locked) this.updateMusic();
     if (this.moving || this.locked || !this.focus.isTop()) return;
     if (this.pendingClick) { const c = this.pendingClick; this.pendingClick = null; this.planTo(c.x, c.y); }
@@ -408,6 +412,7 @@ export class OverworldScene extends Phaser.Scene {
       return;
     }
     this.moving = true;
+    this.stepTo = { x: nx, y: ny };       // townspeople keep out of it
     // the Hall before Cooker falls: no running, a slower, heavier step
     const tense = this.indoors && !this.save.defeated.cooker;
     const running = !tense && (isHeld('run') || !!this.path?.run);
@@ -456,6 +461,7 @@ export class OverworldScene extends Phaser.Scene {
       onComplete: () => {
         this.pos = { x: nx, y: ny };
         this.moving = false;
+        this.stepTo = null;
         this.shadow.setScale(1);
         this.lastMoveEnd = this.time.now;
         this.syncPlayer();
@@ -512,6 +518,8 @@ export class OverworldScene extends Phaser.Scene {
   /** What a click at world (wx, wy) means: a thing to use, or a tile to reach. */
   pickTarget(wx, wy) {
     // characters and capsules are tall: hit their sprites, not just the tile
+    const person = this.townsfolk?.personUnder(wx, wy);
+    if (person) return { use: true, x: person.x, y: person.y, person };
     for (const [k, id] of this.npcAt) {
       const s = this.npcSprites[id];
       if (s?.getBounds().contains(wx, wy)) { const [x, y] = k.split(',').map(Number); return { use: true, x, y }; }
@@ -525,6 +533,8 @@ export class OverworldScene extends Phaser.Scene {
     if (x < 0 || y < 0 || x >= this.map.w || y >= this.map.h) return null;
     if (this.walkable(x, y)) return { use: false, x, y };
     const k = this.map.key(x, y);
+    const folk = this.townsfolk?.at.get(k);
+    if (folk) return { use: true, x: folk.x, y: folk.y, person: folk };
     const usable = this.npcAt.has(k) || this.itemAt.has(k) || this.map.doors.has(k) || this.map.signs.has(k)
       || this.map.lore.has(k) || (x === HALL.gate.x && y === HALL.gate.y);
     if (usable) return { use: true, x, y };
@@ -552,7 +562,7 @@ export class OverworldScene extends Phaser.Scene {
     } else goals = [{ x: t.x, y: t.y }];
     const steps = this.findPath(goals);
     if (!steps) { sfx('bump'); return; }
-    this.path = { steps, use: t.use ? { x: t.x, y: t.y } : null, run: steps.length > 6 };
+    this.path = { steps, goals, use: t.use ? { x: t.x, y: t.y, person: t.person } : null, run: steps.length > 6 };
     used('click');
     this.markTarget(t);
     if (!steps.length) this.followPath();
@@ -592,6 +602,7 @@ export class OverworldScene extends Phaser.Scene {
     const next = path.steps.shift();
     if (!next) {
       this.path = null;
+      if (path.use?.person) { this.reachPerson(path); return; }
       if (path.use) {
         const { x, y } = path.use;
         const dir = x < this.pos.x ? 'left' : x > this.pos.x ? 'right' : y < this.pos.y ? 'up' : 'down';
@@ -601,9 +612,33 @@ export class OverworldScene extends Phaser.Scene {
       return;
     }
     const dir = next.x < this.pos.x ? 'left' : next.x > this.pos.x ? 'right' : next.y < this.pos.y ? 'up' : 'down';
-    if (!this.canStep(this.pos.x, this.pos.y, next.x, next.y)) { this.clearPath(); this.face(dir); return; }
+    if (!this.canStep(this.pos.x, this.pos.y, next.x, next.y)) {
+      // someone wandered across the path: find a way round them
+      if (this.townsfolk?.personAt(next.x, next.y) && (path.replans ?? 0) < 4) {
+        const steps = this.findPath(path.goals);
+        if (steps?.length) { this.path = { ...path, steps, replans: (path.replans ?? 0) + 1 }; return; }
+      }
+      this.clearPath(); this.face(dir); return;
+    }
     this.facing = dir;
     this.tryStep(dir);
+  }
+
+  /** End of a walk to a townsperson: talk if they are still next to us,
+   *  otherwise follow them (they wait for you, so this settles quickly). */
+  reachPerson(path) {
+    const p = path.use.person;
+    const dx = p.x - this.pos.x;
+    const dy = p.y - this.pos.y;
+    if (Math.abs(dx) + Math.abs(dy) === 1) {
+      this.face(dx < 0 ? 'left' : dx > 0 ? 'right' : dy < 0 ? 'up' : 'down');
+      this.interactAt(p.x, p.y, false);
+      return;
+    }
+    if ((path.replans ?? 0) >= 4) return;
+    const goals = [[0, 1], [0, -1], [-1, 0], [1, 0]].map(([gx, gy]) => ({ x: p.x + gx, y: p.y + gy }));
+    const steps = this.findPath(goals);
+    if (steps) this.path = { ...path, steps, goals, replans: (path.replans ?? 0) + 1 };
   }
 
   clearPath() {
@@ -650,6 +685,9 @@ export class OverworldScene extends Phaser.Scene {
     const k = this.map.key(x, y);
     const trainerId = this.npcAt.get(k);
     if (trainerId) { this.runLocked(() => this.talkTrainer(trainerId)); return true; }
+    // townspeople chat when you face them and press confirm (walking into them just bumps)
+    const person = this.townsfolk?.at.get(k);
+    if (person) { if (bumped) return false; this.runLocked(() => this.townsfolk.talk(person)); return true; }
     const item = this.itemAt.get(k);
     if (item && (!bumped || !item.hidden)) { this.runLocked(() => this.pickItem(item)); return true; }
     const door = this.map.doors.get(k);
