@@ -1,8 +1,8 @@
 {
   "netkid": {
     "sheet": "townsfolk/netkid.png",
-    "frameWidth": 67,
-    "frameHeight": 88,
+    "frameWidth": 88,
+    "frameHeight": 120,
     "rows": [
       "down",
       "left",
@@ -23,15 +23,15 @@
       6
     ],
     "head": [
-      6,
-      20,
-      36
+      13,
+      24,
+      40
     ]
   },
   "capkid": {
     "sheet": "townsfolk/capkid.png",
-    "frameWidth": 59,
-    "frameHeight": 90,
+    "frameWidth": 88,
+    "frameHeight": 120,
     "rows": [
       "down",
       "left",
@@ -52,15 +52,15 @@
       6
     ],
     "head": [
-      9,
-      6,
-      40
+      19,
+      22,
+      42
     ]
   },
   "girl": {
     "sheet": "townsfolk/girl.png",
-    "frameWidth": 53,
-    "frameHeight": 86,
+    "frameWidth": 88,
+    "frameHeight": 120,
     "rows": [
       "down",
       "left",
@@ -81,15 +81,15 @@
       6
     ],
     "head": [
-      7,
-      12,
-      38
+      21,
+      24,
+      42
     ]
   },
   "gardener": {
     "sheet": "townsfolk/gardener.png",
-    "frameWidth": 79,
-    "frameHeight": 106,
+    "frameWidth": 88,
+    "frameHeight": 120,
     "rows": [
       "down",
       "left",
@@ -110,15 +110,15 @@
       6
     ],
     "head": [
-      14,
-      14,
-      40
+      19,
+      18,
+      42
     ]
   },
   "farmer": {
     "sheet": "townsfolk/farmer.png",
-    "frameWidth": 82,
-    "frameHeight": 110,
+    "frameWidth": 88,
+    "frameHeight": 120,
     "rows": [
       "down",
       "left",
@@ -139,15 +139,15 @@
       6
     ],
     "head": [
-      22,
-      10,
-      38
+      26,
+      20,
+      40
     ]
   },
   "shopper": {
     "sheet": "townsfolk/shopper.png",
-    "frameWidth": 76,
-    "frameHeight": 100,
+    "frameWidth": 88,
+    "frameHeight": 120,
     "rows": [
       "down",
       "left",
@@ -168,15 +168,15 @@
       6
     ],
     "head": [
-      18,
-      10,
-      42
+      24,
+      20,
+      44
     ]
   },
   "picker": {
     "sheet": "townsfolk/picker.png",
-    "frameWidth": 59,
-    "frameHeight": 104,
+    "frameWidth": 88,
+    "frameHeight": 120,
     "rows": [
       "down",
       "left",
@@ -197,15 +197,15 @@
       6
     ],
     "head": [
-      12,
-      10,
-      38
+      24,
+      18,
+      42
     ]
   },
   "strawkid": {
     "sheet": "townsfolk/strawkid.png",
-    "frameWidth": 61,
-    "frameHeight": 92,
+    "frameWidth": 88,
+    "frameHeight": 120,
     "rows": [
       "down",
       "left",
@@ -226,15 +226,15 @@
       6
     ],
     "head": [
-      11,
-      10,
-      40
+      24,
+      18,
+      42
     ]
   },
   "buggirl": {
     "sheet": "townsfolk/buggirl.png",
-    "frameWidth": 69,
-    "frameHeight": 90,
+    "frameWidth": 88,
+    "frameHeight": 120,
     "rows": [
       "down",
       "left",
@@ -255,9 +255,9 @@
       6
     ],
     "head": [
-      12,
-      12,
-      38
+      21,
+      22,
+      42
     ]
   }
 }

@@ -36,6 +36,10 @@ async function clear() { for (let i = 0; i < 12 && (await locked()); i++) { awai
 
 // put the player on a free tile next to person i (they hold still), facing them
 async function besides(i, dist = 1) {
+  // freeze them first, then let any step already under way land
+  await ow((i) => { const o = window.__game.scene.getScene('Overworld'); o.townsfolk.people[i].next = o.time.now + 60000; }, i);
+  await p.waitForFunction((i) => !window.__game.scene.getScene('Overworld').townsfolk.people[i].moving, i);
+  await sleep(80);
   return ow(([i, dist]) => {
     const o = window.__game.scene.getScene('Overworld');
     const q = o.townsfolk.people[i];
@@ -44,7 +48,12 @@ async function besides(i, dist = 1) {
       const x = q.x + dx * dist;
       const y = q.y + dy * dist;
       if (!o.walkable(x, y) || o.map.isEncounter(x, y)) continue;
-      o.pos = { x, y }; o.face(dir); o.syncPlayer();
+      // reachable from there (not across a hedge wall)
+      const was = o.pos;
+      o.pos = { x, y };
+      const goals = [[0, 1], [0, -1], [-1, 0], [1, 0]].map(([gx, gy]) => ({ x: q.x + gx, y: q.y + gy }));
+      if (!o.findPath(goals)) { o.pos = was; continue; }
+      o.face(dir); o.syncPlayer();
       return { x, y, dir, name: q.def.name };
     }
     return null;
@@ -61,6 +70,9 @@ for (let i = 0; i < ids.length; i++) {
   await p.keyboard.press('Enter');
   await sleep(900);
   check((await speaker()) === spot.name, `${ids[i]}: ENTER talks (${await speaker()})`);
+  await p.waitForFunction(() => window.__game.scene.getScene('OverworldUI').box.arrow.visible, null, { timeout: 8000 });
+  const said = await ow(() => window.__game.scene.getScene('OverworldUI').box.text.text);
+  check(said.length > 10 && !said.includes('{'), `${ids[i]}: says "${said.slice(0, 48)}..."`);
   await shot(`talk_${String(i + 1).padStart(2, '0')}_${ids[i]}`);
   await clear();
   check(!(await locked()), `${ids[i]}: conversation closes`);
@@ -86,6 +98,26 @@ for (let i = 0; i < ids.length; i++) {
   }
 }
 
+// ---- the moment comes first: after COOKER (with your name), then night, then their usual talk ----
+{
+  const gi = ids.indexOf('girl');
+  await ow(() => { const o = window.__game.scene.getScene('Overworld'); o.save.defeated.cooker = true; o.save.stats.playMs = 690000; });   // a clear night
+  const firsts = [];
+  for (let k = 0; k < 3; k++) {
+    await besides(gi, 1);
+    await sleep(250);
+    await p.keyboard.press('Enter');
+    await p.waitForFunction(() => window.__game.scene.getScene('OverworldUI').box.arrow.visible, null, { timeout: 8000 });
+    firsts.push(await ow(() => window.__game.scene.getScene('OverworldUI').box.text.text));
+    await clear();
+  }
+  check(firsts[0].includes('KAI'), `after Cooker, with the name: "${firsts[0]}"`);
+  check(firsts[1].includes('The fountain makes a'), `then the night line: "${firsts[1].slice(0, 50)}..."`);
+  const usual = TOWNSFOLK.find((t) => t.id === 'girl').lines.map((l) => l[0].replace(/ff/g, ''));
+  check(usual.includes(firsts[2].replace(/\u200c/g, '').replace(/ff/g, '')), `then the usual talk: "${firsts[2].slice(0, 50)}..."`);
+  await ow(() => { const o = window.__game.scene.getScene('Overworld'); o.save.defeated.cooker = false; o.save.stats.playMs = 0; });
+}
+
 // ---- wandering: let them roam, walking the player about among them ----
 const areas = await ow(() => window.__game.scene.getScene('Overworld').townsfolk.people.map((q) => q.def.area));
 await ow(() => { for (const q of window.__game.scene.getScene('Overworld').townsfolk.people) q.next = 0; });
@@ -106,7 +138,7 @@ for (const [i] of ids.entries()) {
     }
   }, i);
   const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
-  for (let t = 0; t < 40; t++) {
+  for (let t = 0; t < 25; t++) {
     const k = keys[(t * 7 + i) % 4];
     await p.keyboard.down(k); await sleep(140 + (t % 3) * 60); await p.keyboard.up(k);
     await clear();

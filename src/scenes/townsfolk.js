@@ -8,6 +8,7 @@ import { TOWNSFOLK } from '../data/townsfolk.js';
 import { CHECKPOINTS, PLAYER_START } from '../data/map.js';
 import { looseRng } from '../systems/rng.js';
 import { sfx } from '../systems/audio.js';
+import { isNight, weather } from '../systems/world.js';
 import sprites from '../data/townsfolkSprites.json' with { type: 'json' };
 
 const DELTA = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
@@ -30,7 +31,7 @@ export class Townsfolk {
       const key = `towns_${def.id}`;
       const p = {
         def, meta, key, x: def.home.x, y: def.home.y, dir: 'down', moving: false,
-        next: scene.time.now + looseRng.int(400, 2600), talks: 0, parity: false,
+        next: scene.time.now + looseRng.int(400, 2600), talks: 0, said: new Set(), parity: false,
       };
       const f = scene.standAt(p.x, p.y);
       p.shadow = scene.add.ellipse(f.x, f.y - 1, 20, 7, 0x0b1020, 0.28).setDepth(f.depth - 0.5);
@@ -48,7 +49,29 @@ export class Townsfolk {
 
   /** The person whose sprite covers world point (wx, wy), if any. */
   personUnder(wx, wy) {
-    return this.people.find((p) => p.sprite.visible && p.sprite.getBounds().contains(wx, wy)) ?? null;
+    // the frames are a shared size with room to spare: hit the drawn pixels
+    // (give or take a couple), and the one in front wins
+    const tex = this.scene.textures;
+    let best = null;
+    for (const p of this.people) {
+      const s = p.sprite;
+      if (!s.visible || !s.getBounds().contains(wx, wy)) continue;
+      const lx = Math.floor((wx - s.x) / s.scaleX + s.width * s.originX);
+      const ly = Math.floor((wy - s.y) / s.scaleY + s.height * s.originY);
+      let hit = false;
+      for (let dy = -3; dy <= 3 && !hit; dy += 3) {
+        for (let dx = -3; dx <= 3 && !hit; dx += 3) hit = tex.getPixelAlpha(lx + dx, ly + dy, s.texture.key, s.frame.name) > 0;
+      }
+      if (hit && (!best || s.depth > best.sprite.depth)) best = p;
+    }
+    return best;
+  }
+
+  /** The player stands facing `p`, next to them: they stay put to be talked to. */
+  engaged(p) {
+    const s = this.scene;
+    const [dx, dy] = DELTA[s.facing];
+    return s.pos.x + dx === p.x && s.pos.y + dy === p.y;
   }
 
   update(time) {
@@ -57,8 +80,8 @@ export class Townsfolk {
     for (const p of this.people) {
       if (p.moving || time < p.next) continue;
       p.next = time + looseRng.int(1300, 3800);
-      // someone walking up to talk to them: they wait
-      if (s.path?.use?.person === p) continue;
+      // someone walking up to talk to them, or already facing them: they wait
+      if (s.path?.use?.person === p || this.engaged(p)) continue;
       const dx = s.pos.x - p.x;
       const dy = s.pos.y - p.y;
       const near = Math.abs(dx) + Math.abs(dy);
@@ -123,7 +146,7 @@ export class Townsfolk {
         p.moving = false;
         p.sprite.setFrame(this.frame(p, 0));
         // carry on a step or two, unless something came up
-        if (left > 1 && !s.locked) s.time.delayedCall(40, () => { if (!p.moving && !s.locked) this.step(p, dir, left - 1); });
+        if (left > 1 && !s.locked) s.time.delayedCall(40, () => { if (!p.moving && !s.locked && !this.engaged(p)) this.step(p, dir, left - 1); });
       },
     });
   }
@@ -135,11 +158,26 @@ export class Townsfolk {
     while (p.moving) await new Promise((r) => s.time.delayedCall(30, r));
     this.face(p, OPPOSITE[s.facing]);
     sfx('confirm');
-    const convo = s.save.defeated.cooker && p.def.after
-      ? p.def.after[p.talks % p.def.after.length]
-      : p.def.lines[p.talks % p.def.lines.length];
-    p.talks += 1;
-    await s.ui.say(convo, { speaker: p.def.name, portrait: `${p.key}_face` });
+    // a little hop: they noticed you
+    s.tweens.add({ targets: p.sprite, y: p.sprite.y - 3, duration: 90, yoyo: true, ease: 'Sine.easeOut' });
+    // the moment first (once each per visit: after Cooker, rain, night), then their usual talk in turn
+    const playMs = s.save.stats.playMs;
+    const rain = ['rain', 'storm'].includes(weather(playMs).kind);
+    const ctx = [
+      ['after', !!s.save.defeated.cooker],
+      ['rain', rain],
+      ['night', isNight(playMs)],
+    ].find(([k, on]) => on && p.def[k] && !p.said.has(k))?.[0];
+    let convo;
+    if (ctx) {
+      p.said.add(ctx);
+      convo = p.def[ctx][0];
+    } else {
+      convo = p.def.lines[p.talks % p.def.lines.length];
+      p.talks += 1;
+    }
+    const name = s.save.player.name ?? 'TRAINER';
+    await s.ui.say(convo.map((l) => l.replaceAll('{NAME}', name)), { speaker: p.def.name, portrait: `${p.key}_face` });
     p.next = s.time.now + looseRng.int(1800, 3200);   // a moment's pause before they wander off
   }
 }

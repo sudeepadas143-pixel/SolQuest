@@ -511,27 +511,48 @@ same level for Cooker.
   - Pip (straw hat) among the northern houses.
   - Mr. Alder (gardener) in the Orchard.
 - The second sheet's bottom-row action poses of the net boy, cap kid and farmer are not used; they repeat characters that are already in.
-- `tools/make_townsfolk.py` builds the sprites:
-  - It cuts the four views (or three: front, side, back, with the side mirrored), keys out the backdrop and resamples them.
+- `tools/make_townsfolk.py` builds the sprites to match the player and the Elites:
+  - **One size.** Every townsperson is 48 art pixels tall, drawn 2x2: 96 texels, the player's height. Kids and adults alike, as in the handheld games.
+    - Scale is set once per character, from its shortest view, so a net held overhead doesn't shrink the body.
+    - Every sheet uses the same frame size (88 x 120), bottom-aligned.
+  - **One style.** Source art comes in different styles (sheet 1 is finely detailed, sheet 2 chunky), so everything is reduced to the same art-pixel grid:
+    - a median-of-block downscale;
+    - a 28-colour palette;
+    - a 1-art-pixel outline in the player's outline colour (26, 22, 34).
+    - The 2-pixel antialiased rim, which carried the backdrop green, is shaved off first.
+  - **Cutting.** It cuts the four views (or three: front, side, back, with the side mirrored) and keys out the backdrop.
     - Keying only removes green that touches the crop's edge, plus enclosed gaps that are truly backdrop-coloured, so teal clothes stay solid.
-  - It recolours red-and-white balls (in a hand, on a bag) to the game's violet and mint.
-    - A ball is a red blob, by hue and ball-sized, with white beside it, inside a height band; this runs at full resolution and again after resampling.
-  - It works out which way each side view faces (this can be pinned per character).
-  - It poses walk frames with the simple poser and writes `public/assets/sprites/townsfolk/` plus `src/data/townsfolkSprites.json`.
-  - The badge's head square is also set per character there.
-  - To add more people, add the sheet and an entry in `SHEETS`, then an entry in `src/data/townsfolk.js`.
-- `src/data/townsfolk.js` holds each person's name, home tile, wander patch, conversations (one per talk, in turn) and lines for after Cooker falls.
+  - **Balls.** Red-and-white balls (in a hand, on a bag) are found at full resolution, where their red is pure: a red blob by hue, ball-sized, with white beside it, inside a height band.
+    - Each ball is then repainted in the art pixels as the game's capsule, violet over mint.
+  - **Facing.** It works out which way each side view faces; this can be pinned per character.
+  - **Output.** It poses walk frames with the simple poser (limbs move by whole art pixels) and writes `public/assets/sprites/townsfolk/` and `src/data/townsfolkSprites.json`.
+    - The badge's head square is set per character there.
+  - **Adding people.** Add the sheet and an entry in `SHEETS`, then an entry in `src/data/townsfolk.js`.
+- **Dialogue** (`src/data/townsfolk.js`): each person's lines come from who they are, what they wear and carry, their age and their corner of the route.
+  - Rafi practises throws with his capsule; Auntie Pearl explains her pearls and her snack bag; Nell's goggles and jars; Hazel's gloves and berry bucket; Pip's grandpa's hat; Mr. Alder's shears.
+  - Some lines point at real things nearby: hidden items, the potion by the mill, the pier.
+  - Neighbours mention each other: Joss and Bram's caps, Hazel and Joss's oil can, Pearl and the boy in the blue cap.
+  - Each person has four conversations in turn, plus lines for night, for rain, and for after Cooker falls.
+    - The moment comes first, once per visit (after Cooker, then rain, then night); then the usual turn.
+    - `{NAME}` is the player's name.
 - `scenes/townsfolk.js` runs them:
   - They amble a few tiles at a time and look your way when you come near.
+  - They stand still while you're facing them.
   - They never step onto your tile, the tile you're stepping into, or the next few tiles of a clicked path.
   - They avoid tall grass, doorsteps, signs and checkpoints.
   - They block their tile.
   - They freeze while anything is open.
 - Talking:
   - Face one and press confirm, or click them; you walk over and follow if they move.
+  - Clicks hit their drawn pixels; when two overlap, the one in front wins.
+  - They hop when spoken to.
   - Walking into them only bumps.
   - A clicked path re-plans around anyone who wanders across it.
-- `tools/townsfolk_check.mjs` checks talking (key and click), wander bounds and no overlap.
+- `tools/townsfolk_check.mjs` checks:
+  - talking by key and by click, for everyone;
+  - the text shown;
+  - the order: after Cooker with the name, then night, then the usual talk;
+  - wander bounds, and no overlap with the player.
 
 ## 8. Engineering notes
 
