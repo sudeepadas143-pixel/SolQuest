@@ -20,6 +20,10 @@ export const U = {                  // shared uniforms (set every frame by the f
  *  lamps) that glow at night; optional wind sway for the grass. */
 export function modelMaterial(map, { sway = false } = {}) {
   const m = new THREE.MeshLambertMaterial({ map, flatShading: true, side: THREE.DoubleSide });
+  // Three caches programs by onBeforeCompile's source text, which is the same
+  // for both variants: without its own key, a rigid prop (house, lamp, the
+  // Hall) can be handed the grass's swaying program and wobble in the wind.
+  m.customProgramCacheKey = () => (sway ? 'model-sway' : 'model-rigid');
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader

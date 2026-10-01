@@ -9,6 +9,8 @@
   <canvas id="c" width="960" height="640"></canvas>
   <script type="module">
     import { Drone, LOOP } from '/src/drone/main.js';
+    import * as edit from '/src/drone/edit.js';
+    window.__edit = edit;               // shot list / frameAt, for inspection
     const d = new Drone(document.getElementById('c'));
     window.__drone = { LOOP, ready: d.init(), renderAt: (t) => d.renderAt(t), obj: d,
       frame: (t) => { d.renderAt(t); return document.getElementById('c').toDataURL('image/png'); } };
