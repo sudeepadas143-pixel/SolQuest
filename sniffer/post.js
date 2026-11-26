@@ -71,7 +71,9 @@ export function createPost(R, { mobile = false, lines = 520, maxPixels = 2.4e6 }
         float l=dot(c,vec3(.2126,.7152,.0722)),lt=aces(vec3(l)).x;vec3 lp=c*(lt/max(l,1e-4));
         c=mix(lp,aces(c),.45);                                                                     // 55% hue-preserving + 45% per-channel ACES
         l=dot(c,vec3(.2126,.7152,.0722));c=mix(vec3(l),c,.92);c=(c-.5)*1.08+.5;
-        c+=vec3(-.02,.008,.035)*(1.-smoothstep(0.,.5,l));                                          // cool shadows
+        c+=vec3(-.03,.012,.02)*(1.-smoothstep(0.,.45,l));                                         // teal-green shadows (the gassed city)
+        c+=vec3(.035,.012,-.03)*smoothstep(.5,1.,l);                                               // warm golden highlights
+        {vec2 vq=vUv-.5;c*=1.-dot(vq,vq)*.55;}                                                     // lens vignette
         c=clamp(c,0.,1.);
         if(uGas>.001){ // toon gas wipe: posterised fbm with an outline at each band edge
           vec2 q=vUv*vec2(1.6,1.)*3.;float n=fbm(q+vec2(uT*.35,-uT*.22))*.7+fbm(q*2.3-uT*.5)*.3;float v=n+uGas*1.25-.75;

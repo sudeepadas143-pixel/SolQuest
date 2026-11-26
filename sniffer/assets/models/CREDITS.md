@@ -11,3 +11,6 @@ site's About card. They are the meshopt-compressed copies used by itshoss.fun.
 `sniffer.glb` is the project's own character: generated with Meshy AI from the Sniffer artwork by the project owner,
 then cleaned (gas cloud removed), decimated and rigged with `tools/prep_meshy.py`. `board.glb` is built by
 `tools/build_board.py`.
+
+## UI
+- `vendor/nes-ui.css`: the button, container and progress components of [NES.css](https://github.com/nostalgic-css/NES.css) v2.3.0 by B.C.Rikko, MIT License.

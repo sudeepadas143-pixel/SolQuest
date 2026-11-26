@@ -51,6 +51,8 @@ const pm = new THREE.PMREMGenerator(R);
 scene.environment = pm.fromScene(new RoomEnvironment(), .04).texture; scene.environmentIntensity = .4;
 const cam = new THREE.PerspectiveCamera(32, 1, .1, 420);
 scene.add(new THREE.HemisphereLight(0xb9a6d6, 0x4a3030, 1.1));
+scene.add(new THREE.HemisphereLight(0xffd0a0, 0x3e5a2c, .35)); // gas-green bounce from below
+const rimL = new THREE.DirectionalLight(0xffcf8a, 2.2); rimL.position.set(-30, 9, -22); scene.add(rimL); // golden backlight: rims him and the cops against the sky
 const sunL = new THREE.DirectionalLight(0xffb98a, 3.0);
 sunL.position.set(26, 20, -14); sunL.castShadow = true;
 sunL.shadow.mapSize.set(MOBILE ? 1024 : 2048, MOBILE ? 1024 : 2048);
@@ -190,9 +192,7 @@ const tiles = Array.from({ length: NT }, (_, i) => buildTile(i));
 /* ================================================================== loading the models */
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const prog = { sn: 0, bd: 0, cop: 0, urb: 0, font: 0 };
-const showProg = () => { const p = Math.round((prog.sn * 35 + prog.bd * 5 + prog.cop * 20 + prog.urb * 25 + prog.font * 15)); $('prog').textContent = p + '%'; $('bar').style.width = p + '%'; dispatchLog(p); };
-const LOG = [[0, '> PATCHING INTO CITY CCTV...'], [12, '> ODOR SPIKE DETECTED: SECTOR 7'], [30, '> SUSPECT ID: SNIFFER (HOOD, GAS MASK)'], [50, '> VEHICLE: SKATEBOARD. VERY FAST.'], [70, '> UNITS DISPATCHED: 2 CRUISERS, 1 CHOPPER'], [100, '! WARNING: DO NOT INHALE', 'warn']];
-let logN = 0; function dispatchLog(p) { const ol = $('log'); while (logN < LOG.length && p >= LOG[logN][0]) { const li = document.createElement('li'); li.textContent = LOG[logN][1]; if (LOG[logN][2]) li.className = LOG[logN][2]; ol.append(li); while (ol.children.length > 5) ol.firstChild.remove(); logN++; } }
+const showProg = () => { const p = Math.round((prog.sn * 35 + prog.bd * 5 + prog.cop * 20 + prog.urb * 25 + prog.font * 15)); $('prog').textContent = p < 100 ? `loading ${p}%` : 'ready'; $('bar').style.width = p + '%'; };
 const load = (url, key) => new Promise((res, rej) => loader.load(url, g => { prog[key] = 1; showProg(); res(g); }, e => { if (e.total) { prog[key] = e.loaded / e.total * .95; showProg(); } }, rej));
 document.fonts.ready.then(() => { prog.font = 1; showProg(); });
 function retro(root, { shadows = true } = {}) { // nearest-filtered textures everywhere (the PS2 look) + shadows
@@ -270,6 +270,15 @@ const GAS = createGas(scene, { max: MOBILE ? 180 : 260 });
 GAS.air.set(-SPEED, 0, 0); GAS.setFog(SKY.hor, 40, 130);
 const _bp = V3(), _bd = V3(), _cq = new THREE.Quaternion();
 function buttWorld() { butt.getWorldPosition(_bp); _bd.set(0, 0, -1).applyQuaternion(charG.getWorldQuaternion(_cq)); return _bp; }
+// the whole city is gassed: banks of his green cloud sit in the street, roll along the sidewalks and hang between the buildings, scrolling with the world
+const SMOG = createGas(scene, { max: MOBILE ? 150 : 240, palette: { lit: 0xd8eaa8, mid: 0xaac47c, shade: 0x7e9c58, deep: 0x56703c, line: 0x2a3c1c } }); SMOG.uniforms.uOutline.value = .05; SMOG.setFog(SKY.hor, 30, 120);
+{ let sd = 911; const r = () => (sd = (sd * 16807) % 2147483647) / 2147483647; const n = MOBILE ? 150 : 240;
+  for (let i = 0; i < n; i++) { const band = r(); let z, y, sz;
+    if (band < .3) { z = (r() < .5 ? -1 : 1) * (8 + r() * 4); y = .2 + r() * 1.2; sz = .9 + r() * 1.4; }        // rolling along the sidewalks
+    else if (band < .5) { z = (r() - .5) * 13; y = .15 + r() * .4; sz = .6 + r() * .9; if (Math.abs(z - LANE) < 1.6) z += 3.2 * Math.sign(z - LANE || 1); } // low wisps on the road, off his lane
+    else { z = (r() < .5 ? -1 : 1) * (11 + r() * 12); y = 2 + r() * 13; sz = 1.4 + r() * 2.6; }               // hanging between the buildings
+    SMOG.P.push({ x: (r() * LOOP) - HB, y, z, by: y, vx: 0, vy: 0, vz: 0, age: .3, life: 1e9, s0: sz, s1: sz, drag: 0, seed: r(), rx: r() * 6, ry: r() * 6, heat: 0, squash: .7 + r() * .2, buoy: 0, ph: r() * 6 }); } }
+function stepSmog(dt) { for (const p of SMOG.P) { p.x = wrapX(p.x - SPEED * dt); p.y = p.by + Math.sin(clock * .7 + p.ph) * .12; p.rx += dt * .1; } SMOG.step(0, clock); }
 const CLING = createGas(scene, { max: 9 }); CLING.uniforms.uOutline.value = .06;
 const CLING_P = [[0, .34, -.40, .15], [.1, .27, -.42, .12], [-.11, .29, -.41, .12], [.05, .44, -.37, .11], [-.06, .21, -.43, .11], [.15, .38, -.33, .09], [-.15, .4, -.34, .09], [0, .17, -.4, .1], [.02, .52, -.33, .08]];
 for (const [x, y, z, s] of CLING_P) CLING.P.push({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: .22, life: 1e9, s0: s, s1: s, drag: 0, seed: Math.random(), rx: Math.random() * 6, ry: Math.random() * 6, heat: .3, squash: .9, buoy: 0, lx: x, ly: y, lz: z });
@@ -277,7 +286,7 @@ const _cl = V3();
 function stepCling() { // follow his butt every frame, breathing gently
   charG.updateMatrixWorld(true); CLING.mesh.visible = CLING.hull.visible = !!BONES.body;
   CLING.P.forEach((p, i) => { _cl.set(p.lx, p.ly, p.lz).applyMatrix4(charG.matrixWorld); p.x = _cl.x; p.y = _cl.y + Math.sin(clock * 3 + i) * .008; p.z = _cl.z;
-    const k = (1 + Math.sin(clock * 4.2 + i * 1.7) * .08) * (INTRO.on && (INTRO.ph === 'pull' || INTRO.ph === 'wait' || INTRO.ph === 'crouch') ? .45 : 1); p.s0 = p.s1 = CLING_P[i][3] * CS * k; p.heat = .25 + Math.max(0, Math.sin(clock * 2 + i)) * .2; });
+    const k = (1 + Math.sin(clock * 4.2 + i * 1.7) * .08) * (INTRO.on && (INTRO.ph === 'glide' || INTRO.ph === 'wait' || INTRO.ph === 'alert' || INTRO.ph === 'crouch') ? .45 : 1); p.s0 = p.s1 = CLING_P[i][3] * CS * k; p.heat = .25 + Math.max(0, Math.sin(clock * 2 + i)) * .2; });
   CLING.step(0, clock);
 }
 function fartBurst(n = 30, power = 1) { buttWorld(); GAS.burst(_bp, _bd, n, power); RIG.squish = 1; fartSound(power, .35 + power * .35 + R01() * .3); }
@@ -419,7 +428,7 @@ function stepTravel(dt) {
 
 /* ================================================================== MEMES: mega fart → launch → sky with toon clouds → card carousel */
 const GAL = { on: false, t: 0, sky: false, idx: 0, side: 0, yaw: 0, yaw0: 0, slide: 1, ui: 0, hov: 0, fly: 0 };
-const STREET = [road, ground, curbs, ...walks, ...tiles, heli, beam, spot];
+const STREET = [road, ground, curbs, ...walks, ...tiles, heli, beam, spot, SMOG.mesh, SMOG.hull];
 const CLOUDS = createGas(scene, { max: 220, palette: { lit: 0xfff6fb, mid: 0xf6d6ea, shade: 0xc9a6d6, deep: 0x9a7ab8, line: 0x5a4380 } });
 CLOUDS.mesh.visible = CLOUDS.hull.visible = false; CLOUDS.uniforms.uOutline.value = .035; CLOUDS.setFog(SKY_G.hor, 110, 320); CLOUDS.uniforms.uL.value.set(-.5, .8, .4);
 { seed = 909; for (let i = 0; i < 34; i++) {
@@ -429,7 +438,11 @@ CLOUDS.mesh.visible = CLOUDS.hull.visible = false; CLOUDS.uniforms.uOutline.valu
 } for (const p of CLOUDS.P) { p.by = p.y; p.s0 = p.s1 = p.sz; } }
 function stepClouds(shift, lift) { for (const p of CLOUDS.P) { p.x = ((p.bx - shift + 100) % 200 + 200) % 200 - 100; p.y = p.by + lift; p.vx = p.vy = p.vz = 0; } CLOUDS.air.set(0, 0, 0); CLOUDS.step(0, clock); }
 const texLoader = new THREE.TextureLoader(), memeTex = [], memeURL = [];
-function placeholder(i) { const c = document.createElement('canvas'); c.width = c.height = 512; const x = c.getContext('2d'); const g = x.createRadialGradient(256, 230, 20, 256, 256, 360); g.addColorStop(0, '#c3e88a'); g.addColorStop(1, '#2a4a1a'); x.fillStyle = g; x.fillRect(0, 0, 512, 512); x.fillStyle = '#16300c'; x.font = 'bold 220px monospace'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('?', 256, 230); x.fillStyle = '#f2ffe0'; x.font = 'bold 30px monospace'; x.fillText('MEME #' + (i + 1), 256, 400); x.font = '20px monospace'; x.fillText('drop it in memes/', 256, 440); return c; }
+function placeholder(i) { // no words: a green gas-cloud card until the real meme is dropped into memes/
+  const c = document.createElement('canvas'); c.width = c.height = 512; const x = c.getContext('2d'), g = x.createRadialGradient(256, 230, 20, 256, 256, 360); g.addColorStop(0, '#c3e88a'); g.addColorStop(1, '#2a4a1a'); x.fillStyle = g; x.fillRect(0, 0, 512, 512);
+  let sd = 7 + i * 13; const r = () => (sd = (sd * 16807) % 2147483647) / 2147483647; x.fillStyle = '#e8f8c8'; x.strokeStyle = '#1f3a10'; x.lineWidth = 8;
+  for (let k = 0; k < 9; k++) { x.beginPath(); x.arc(140 + r() * 232, 190 + r() * 150, 50 + r() * 50, 0, Math.PI * 2); x.stroke(); } sd = 7 + i * 13; // same circles again, filled, over their outlines
+  for (let k = 0; k < 9; k++) { x.beginPath(); x.arc(140 + r() * 232, 190 + r() * 150, 50 + r() * 50, 0, Math.PI * 2); x.fill(); } return c; }
 function memeMap(i) { for (const j of [i, (i + 1) % MEMES.length, (i + MEMES.length - 1) % MEMES.length]) if (!memeTex[j]) { memeURL[j] = MEMES[j].src; const t = memeTex[j] = texLoader.load(MEMES[j].src, undefined, undefined, () => { const c = placeholder(j); t.image = c; t.needsUpdate = true; memeURL[j] = c.toDataURL(); }); t.colorSpace = THREE.SRGBColorSpace; } return memeTex[i]; }
 const CARD = 1.15;
 const card = (() => { const back = new THREE.MeshStandardMaterial({ color: 0x1d3a12, roughness: .5, metalness: .2 }), faces = [0, 1].map(() => new THREE.MeshBasicMaterial({ fog: false })), m = new THREE.Mesh(box(CARD, CARD, .05), [back, back, back, back, ...faces]); m.visible = false; m.userData.faces = faces; scene.add(m); return m; })();
@@ -437,7 +450,7 @@ const SKY_CAM = { pos: V3(-5.8, 2.4, 3.6), look: V3(2, .5, 0), fov: 44 };
 const _gx = V3(), _gy = V3(), _gz = V3(), _gp = V3(), _gq = new THREE.Quaternion(), _ge = new THREE.Euler();
 const galFlash = () => { const f = $('flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); };
 function setGalUI(on) { const g = $('gal'); g.classList.toggle('on', on); g.setAttribute('aria-hidden', String(!on)); g.toggleAttribute('inert', !on); }
-function galCaption() { const m = MEMES[GAL.idx], cap = $('galCap'), b = document.createElement('b'); b.textContent = m.name; cap.replaceChildren(`${GAL.idx + 1}/${MEMES.length} · It's `, b, `. ${m.ask}`); }
+function galCaption() {} // the meme gallery has no words: just the pictures
 function startGallery() { Object.assign(GAL, { on: true, t: 0, sky: false, ui: 0, fly: 0, launched: false }); galCaption(); }
 function setSky(on) { SUN.set(on ? -.55 : .86, on ? .3 : .12, on ? .78 : -.5).normalize(); const P = on ? SKY_G : SKY; scene.fog.color.copy(P.hor); skyU.uHor.value.copy(P.hor); skyU.uMid.value.copy(P.mid); skyU.uTop.value.copy(P.top); scene.fog.far = on ? 400 : 130; GAS.setFog(P.hor, on ? 60 : 40, on ? 300 : 130); fill.intensity = on ? 2.6 : .6; }
 function endGallery() {
@@ -485,8 +498,8 @@ function stepGallery(dt) {
 /* ================================================================== INTRO: the rooftop. Sniffer on a skyscraper ledge above a canyon of towers →
    JUMP → anticipation, leap, dive through the city, flip, land on his glowing board in the street, gas → chase */
 const roof = new THREE.Scene();
-const HAZE = new THREE.Color(0xc9d6e6); // soft blue sky haze (keeps the far towers in the painting's pale blue)
-roof.background = HAZE.clone(); roof.fog = new THREE.Fog(HAZE.clone(), 220, 820); roof.environment = scene.environment; roof.environmentIntensity = .35;
+const HAZE = new THREE.Color(0xe4e1dc); // the painting's pale sky: far towers fade to paper white
+roof.background = HAZE.clone(); roof.fog = new THREE.Fog(HAZE.clone(), 260, 900); roof.environment = scene.environment; roof.environmentIntensity = .35;
 const ROOF_Y = 140; // top of Sniffer's building
 // arched-window facade (the painting's warm towers) — white base, tinted per building by vertex colour
 const archTex = canvasTex(16, 32, (x, w, h) => {
@@ -504,10 +517,11 @@ const RMAT = {
   flat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .9, flatShading: true }),
   ink: new THREE.LineBasicMaterial({ color: 0x141210, transparent: true, opacity: .75 }),
 };
-const WARM = [0xf0b45a, 0xe58a5a, 0xf2c86b, 0xd9a35a, 0xf09a7a, 0xe8c27a], COOL = [0x5aa6a0, 0x7a9ad8, 0xa87ac8, 0x6ac08a, 0x4f8fb8, 0xd27aa0],
-  DARK = [0x7a3a4e, 0x5a3a6a, 0x8a4a42, 0x3f4a78, 0x9a5a4a, 0x2f6a6a], GREY = [0xb8a2d6, 0x94b4de, 0xe2b09a, 0x9ccab0, 0xd6a2c4, 0xc8c0e8, 0xe6c88e];
-const TRIM = [0xf6ecd6, 0x2a2430, 0xffffff, 0x3a2a24];
-const NEON = [0xff3d8b, 0x3dfcff, 0xfff03d, 0x8bff3d, 0xff7a2a, 0xb06aff];
+// the reference painting: sunlit ochre and sandstone on the west side, deep maroon / plum / umber in shadow, the far city in inked grey-white
+const WARM = [0xe0a24e, 0xd99a58, 0xeab46a, 0xc98a4e, 0xd8b07a, 0xb8804a], COOL = [0x6a3440, 0x4e2c40, 0x7a4a3e, 0x5a3a52, 0x3e2a3a, 0x8a5a48],
+  DARK = [0x4a2232, 0x3a2234, 0x5a2e30, 0x2e2236, 0x6a3a36, 0x3a2a2e], GREY = [0xf2f2f0, 0xdcdcda, 0xc4c4c2, 0xa8a8a6, 0x8e8e8e, 0xeaeae8, 0x767676];
+const TRIM = [0xf0e0c0, 0x2a1c1c, 0xd8c8a8, 0x3a2420];
+const NEON = [0xffb24a, 0xffd27a, 0xff8a3a];
 let roofSeed = 4040; const rr = () => (roofSeed = (roofSeed * 16807) % 2147483647) / 2147483647;
 const inkPos = [];
 function inkBox(x, y, z, w, h, d) { // ink outline of a box (the sketchy line work on the distant towers)
@@ -516,8 +530,8 @@ function inkBox(x, y, z, w, h, d) { // ink outline of a box (the sketchy line wo
 }
 function tower(B, x, z, w, d, h, far) {
   const lit = x < 0 ? .75 : .4; // sun from the left: west towers glow warm, east ones sit in deep jewel-tone shade
-  const col = far ? GREY[rr() * GREY.length | 0] : rr() < lit ? (rr() < .6 ? WARM : COOL)[rr() * 6 | 0] : DARK[rr() * DARK.length | 0];
-  const trim = TRIM[rr() * TRIM.length | 0], round = !far && rr() < .2;
+  const col = far ? GREY[rr() * GREY.length | 0] : rr() < lit ? (rr() < .7 ? WARM : COOL)[rr() * 6 | 0] : DARK[rr() * DARK.length | 0];
+  const trim = TRIM[rr() * TRIM.length | 0], round = !far && rr() < .1;
   let y = 0, cw = w, cd = d; const tiers = h > 80 && rr() < .75 ? 2 + (rr() * 2 | 0) : 1;
   for (let t = 0; t < tiers; t++) { // stepped setbacks, each capped with a cornice
     const th = t === tiers - 1 ? h - y : h * (.5 + rr() * .2) - y; if (th <= 2) break;
@@ -530,7 +544,7 @@ function tower(B, x, z, w, d, h, far) {
       B.add(g, RMAT.bld, col, T(x, y + th / 2, z)); if (far || rr() < .35) inkBox(x, y + th / 2, z, cw, th, cd);
       if (!far) { B.add(box(cw + .9, 1, cd + .9), RMAT.flat, trim, T(x, y + th - .5, z)); if (th > 30 && rr() < .6) B.add(box(cw + .5, .6, cd + .5), RMAT.flat, trim, T(x, y + th * .5, z)); }
     }
-    if (!far && t === 0 && rr() < .45) { // a neon sign / billboard facing the canyon
+    if (!far && t === 0 && rr() < .12) { // the odd warm-lit sign facing the canyon
       const sx = x - Math.sign(x) * (cw / 2 + .35), sy = 18 + rr() * Math.min(60, th - 24), nc = NEON[rr() * NEON.length | 0];
       if (rr() < .5) { B.add(box(.5, 4 + rr() * 3, 9 + rr() * 6), RMAT.neon, nc, T(sx, sy, z)); B.add(box(.6, 5.5 + rr() * 3, 10.5 + rr() * 6), RMAT.flat, 0x1a1420, T(sx + Math.sign(x) * .1, sy, z)); }
       else B.add(box(.5, 12 + rr() * 10, 2.4), RMAT.neon, nc, T(sx, sy + 6, z + (rr() - .5) * cd * .5));
@@ -538,8 +552,8 @@ function tower(B, x, z, w, d, h, far) {
     y += th; cw *= .74; cd *= .74;
   }
   const top = rr(), rc = Math.min(cw, cd);
-  if (far) { if (top < .35) { const sh = 6 + rr() * 22; B.add(new THREE.ConeGeometry(rc * .35, sh, 4), RMAT.flat, 0xb9b0c8, T(x, y + sh / 2, z, 0, Math.PI / 4)); } return; }
-  if (top < .22) { B.add(new THREE.SphereGeometry(rc * .42, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), RMAT.flat, rr() < .5 ? 0x5ac8a8 : 0xd8a040, T(x, y, z)); B.add(new THREE.CylinderGeometry(.15, .15, 7, 6), RMAT.flat, 0x2a2430, T(x, y + rc * .42 + 3, z)); }
+  if (far) { inkBox(x, y / 2, z, w, y, d); if (top < .45) { const sh = 6 + rr() * 22; B.add(new THREE.ConeGeometry(rc * .35, sh, 4), RMAT.flat, 0xb9b0c8, T(x, y + sh / 2, z, 0, Math.PI / 4)); } return; }
+  if (top < .22) { B.add(new THREE.SphereGeometry(rc * .42, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), RMAT.flat, rr() < .5 ? 0x6a7a6a : 0xb8823a, T(x, y, z)); B.add(new THREE.CylinderGeometry(.15, .15, 7, 6), RMAT.flat, 0x2a2430, T(x, y + rc * .42 + 3, z)); }
   else if (top < .5) { const tx = x + (rr() - .5) * cw * .4, tz = z + (rr() - .5) * cd * .4; // water tank on stilts
     B.add(new THREE.CylinderGeometry(1.8, 1.8, 3.2, 12), RMAT.flat, 0x8a5a3a, T(tx, y + 4.4, tz)); B.add(new THREE.ConeGeometry(2, 1.3, 12), RMAT.flat, 0x4a3226, T(tx, y + 6.65, tz));
     for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B.add(box(.25, 2.8, .25), RMAT.flat, 0x2a2018, T(tx + a * 1.2, y + 1.4, tz + b * 1.2)); }
@@ -552,11 +566,9 @@ function tower(B, x, z, w, d, h, far) {
   B.add(box(30, 1.0, .6), RMAT.flat, 0x8a5a48, T(0, ROOF_Y + .5, -2.4)); // the parapet (brick red)
   B.add(box(30.3, .16, .85), RMAT.flat, 0xa89276, T(0, ROOF_Y + 1.02, -2.4)); // stone coping he stands on
   for (let x = -14; x <= 14; x += 3.5) B.add(box(.12, .9, .04), RMAT.flat, 0x6a4034, T(x, ROOF_Y + .45, -2.72)); // pilaster joints
-  B.add(box(30, .2, 26), RMAT.flat, 0x3a3436, T(0, ROOF_Y + .1, 11)); // tar roof deck
-  // rooftop clutter (AC units, vents, a water tank) so the corner of frame reads as a real roof
-  for (const [x, z, w, h, d, c] of [[3, .4, 2.2, 1.1, 1.5, 0x9aa0a6], [5.8, .6, 1.4, .9, 1.4, 0x8a9096], [-2, 2, 2.6, 1.4, 2, 0xa0a4a8], [11.5, 3.5, 1, 1.8, 1, 0x6a6e72]])
-    B.add(box(w, h, d), RMAT.flat, c, T(x, ROOF_Y + .2 + h / 2, z));
-  for (const [x, z] of [[1, -.6], [7.5, 1.2], [9.5, -.4]]) B.add(new THREE.CylinderGeometry(.12, .12, .8, 8), RMAT.flat, 0x5a5e62, T(x, ROOF_Y + .6, z));
+  B.add(box(30, .2, 26), RMAT.flat, 0xa8885e, T(0, ROOF_Y + .1, 11)); // sunlit sandstone deck
+  B.add(new THREE.RingGeometry(2.2, 2.9, 32).rotateX(-Math.PI / 2), RMAT.flat, 0xe8d8b4, T(2, ROOF_Y + .22, 4.5)); B.add(box(6.5, .04, 6.5), RMAT.flat, 0x8a6a48, T(2, ROOF_Y + .21, 4.5));
+  for (const [x, z, w, h, d] of [[-4, 6, 3, 1.6, 2.4], [-9, 3, 2.2, 1, 2.2]]) B.add(box(w, h, d), RMAT.flat, 0x6a4a3a, T(x, ROOF_Y + .2 + h / 2, z));
   B.add(new THREE.CylinderGeometry(1.6, 1.6, 2.6, 14), RMAT.flat, 0x7a5236, T(-6, ROOF_Y + 3.6, 6)); B.add(new THREE.ConeGeometry(1.75, .9, 14), RMAT.flat, 0x4a3226, T(-6, ROOF_Y + 5.35, 6));
   for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B.add(box(.15, 2.3, .15), RMAT.flat, 0x3a2a22, T(-6 + dx * 1.1, ROOF_Y + 1.35, 6 + dz * 1.1));
   B.add(new THREE.PlaneGeometry(26, 900).rotateX(-Math.PI / 2), RMAT.flat, 0x3a3640, T(0, .01, -420)); // the street below
@@ -593,10 +605,12 @@ roof.add(new THREE.HemisphereLight(0xd6dcea, 0x8a5a4a, 1.25)); roof.add(new THRE
 const roofSun = new THREE.DirectionalLight(0xffd49a, 3.2); roofSun.position.set(-120, 220, -40); roofSun.target.position.set(0, 60, -120); roof.add(roofSun, roofSun.target);
 const roofKey = new THREE.DirectionalLight(0xfff0dc, 1.4); roofKey.position.set(-6, 150, 8); roofKey.target.position.set(0, ROOF_Y, 0); roofKey.castShadow = true;
 Object.assign(roofKey.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 1, far: 30 }); roofKey.shadow.mapSize.set(1024, 1024); roof.add(roofKey, roofKey.target);
-// soft blue toon clouds drifting through the canyon (the painting's blue puffs)
-const RCLOUD = createGas(roof, { max: 160, palette: { lit: 0xc4dbe8, mid: 0x9fc0d4, shade: 0x7a9fb8, deep: 0x5f829c, line: 0x35536b } });
-RCLOUD.uniforms.uOutline.value = .03; RCLOUD.setFog(HAZE, 260, 850); RCLOUD.uniforms.uL.value.set(-.6, .7, .2);
-{ roofSeed = 77; const clus = [[-14, 118, -26, 7], [16, 106, -40, 8], [-26, 80, -70, 10], [24, 70, -95, 11], [-8, 128, -12, 4], [11, 132, -6, 3.5], [-40, 120, -150, 14], [40, 100, -180, 15], [0, 60, -130, 12], [-6, 136.5, 6, 3], [9, 135.5, 9, 3.5]];
+// the city is gassed: his green clouds hang in the canyon at every height (the painting's puffs, in Sniffer's colour)
+const RCLOUD = createGas(roof, { max: 340, palette: { lit: 0xe2f0b8, mid: 0xb8d088, shade: 0x86a85e, deep: 0x5a7a40, line: 0x2e4420 } });
+RCLOUD.uniforms.uOutline.value = .03; RCLOUD.setFog(HAZE, 260, 900); RCLOUD.uniforms.uL.value.set(-.6, .7, .2);
+{ roofSeed = 77; const clus = [[-14, 118, -26, 7], [16, 106, -40, 8], [-26, 80, -70, 10], [24, 70, -95, 11], [-8, 124, -14, 5], [-40, 120, -150, 14], [40, 100, -180, 15], [0, 60, -130, 12],
+    [-12, 40, -60, 12], [14, 20, -90, 14], [-6, 12, -170, 16], [10, 30, -240, 18], [-30, 50, -300, 22], [28, 34, -360, 22], [0, 90, -260, 18], [-18, 150, -90, 9], [22, 140, -130, 11],
+    [-12, 137, 1.5, 3.2], [-7, 136, -6.5, 2.4], [15, 136.5, -1, 3.4], [18, 133, -9, 3]]; // last four: banks right by the lens, framing him like the painting's corners
   for (const [cx, cy, cz, w] of clus) for (let k = 0, n = 5 + (rr() * 4 | 0); k < n; k++) { const u = rr() * 2 - 1;
     RCLOUD.P.push({ x: cx + u * w, y: cy + rr() * w * .35, z: cz + (rr() - .5) * w * .6, bx: cx + u * w, vx: 0, vy: 0, vz: 0, age: .2, life: 1e9, s0: 0, s1: 0, sz: w * (.45 + rr() * .3), drag: 0, seed: rr(), rx: rr() * 6, ry: rr() * 6, heat: 0, squash: .75, buoy: 0 }); }
   for (const p of RCLOUD.P) p.s0 = p.s1 = p.sz; }
@@ -609,30 +623,46 @@ const LAND = V3(0, 0, -56), LEDGE = V3(8, ROOF_Y + 1.1, -2.4);
 const FWD = V3(LAND.x - LEDGE.x, 0, LAND.z - LEDGE.z).normalize(), RGT = V3(-FWD.z, 0, FWD.x), FACE = Math.atan2(FWD.x, FWD.z); // the snout points +Z at rest (measured)
 const TURN = 0; // fraction of the way to face the camera; on the ledge he stands turned toward the camera; in the crouch he squares up to the drop
 const at = (f, u, r) => LEDGE.clone().addScaledVector(FWD, f).addScaledVector(RGT, r).add(V3(0, u, 0));
-const AK = {
-  close: { pos: at(1.35, .45, .55), look: at(0, .58, 0), fov: 36 },    // floating in the void in front of him: his mask fills the frame
-  wide: { pos: at(2.7, .55, 1.15), look: at(0, .5, -.15), fov: 44 },    // drift back and down: he peers over the edge at us, towers rising behind him
+const AK = { // the reference painting's POV: high over his shoulder, looking steeply down the canyon, him big in the lower middle, the ledge on a diagonal
+  pov: { pos: at(-1.15, 2.0, 1.05), look: at(18, -14, -7.5), fov: 52 },
 };
-const LEDGE_YAW = (() => { const d = AK.wide.pos.clone().sub(LEDGE); let a = Math.atan2(d.x, d.z) - FACE; a = Math.atan2(Math.sin(a), Math.cos(a)); return a * TURN; })();
+const GLIDE = { a: at(-140, 34, 60), m: at(-34, 14, 30), la: at(-20, 0, 0), fov0: 58, dur: 7.5 }; // a low swooping flight over the rooftops, not a top-down drone // loading: in from the sky, banking down onto him
+const LEDGE_YAW = 0; // he faces out over the drop, the way the painting has him
 const INTRO = { on: false, ph: 'off', t: 0, a: null, b: null, bt: 0, dur: 1 };
 function camKey(k, dur) { INTRO.a = { pos: camState.pos.clone(), look: camState.look.clone(), fov: camState.fov }; INTRO.b = AK[k]; INTRO.bt = 0; INTRO.dur = dur; }
 function stepCamKey(dt) { if (!INTRO.b) return; INTRO.bt = Math.min(1, INTRO.bt + dt / INTRO.dur); const k = ease(INTRO.bt); camState.pos.lerpVectors(INTRO.a.pos, INTRO.b.pos, k); camState.look.lerpVectors(INTRO.a.look, INTRO.b.look, k); camState.fov = lerp(INTRO.a.fov, INTRO.b.fov, k); }
 function startIntro() {
-  INTRO.on = true; INTRO.ph = 'pull'; INTRO.t = 0; roof.add(skater); GAS.attach(roof); CLING.attach(roof);
+  INTRO.on = true; INTRO.ph = 'glide'; INTRO.t = 0; roof.add(skater); GAS.attach(roof); CLING.attach(roof);
   for (const S of [GAS, CLING]) { S.setFog(HAZE, 220, 820); S.uniforms.uAmb.value.setRGB(1, 1, 1); } GAS.air.set(.6, 0, -.4); GAS.clear();
   skater.position.copy(LEDGE); skater.rotation.set(0, FACE + LEDGE_YAW, 0, 'YXZ'); streetBoard.rotation.y = FACE; boardG.visible = false; charG.position.set(0, 0, 0); charG.rotation.set(0, 0, 0);
-  Object.assign(camState, { pos: AK.close.pos.clone(), look: AK.close.look.clone(), fov: AK.close.fov, par: .15, roll: 0, ap: .07 }); camKey('wide', 4.2);
-  windStart();
+  Object.assign(camState, { pos: GLIDE.a.clone(), look: GLIDE.la.clone(), fov: GLIDE.fov0, par: .1, roll: 0, ap: .05 });
 }
-function rideClick() { if (INTRO.ph !== 'wait') return; $('ride').classList.remove('on'); startMusic(); INTRO.ph = 'crouch'; INTRO.t = 0; }
+function rideClick() { // ENTER: the sirens hit, he startles, then jumps
+  if (!INTRO.on || !(INTRO.ph === 'glide' || INTRO.ph === 'wait')) return; windStart(); sirenAlarm(); INTRO.ph = 'alert'; INTRO.t = 0; INTRO.c0 = camState.pos.clone(); INTRO.l0 = camState.look.clone(); INTRO.f0v = camState.fov;
+}
 const _fp = V3(), _fl = V3(), _cpo = V3(), _clo = V3();
 function stepIntro(dt) {
   INTRO.t += dt; const t = INTRO.t; stepCityLife(dt); RCLOUD.P.forEach((p, i) => { p.x = p.bx + Math.sin(clock * .05 + i) * 1.5; }); RCLOUD.step(0, clock);
-  if (INTRO.ph === 'pull' || INTRO.ph === 'wait') { // peering over the edge in the wind: weight shifts, looks around, leans to look down
-    stepCamKey(dt); RIG.headYaw = Math.sin(clock * .45) * .35 + Math.sin(clock * 1.3) * .05; RIG.crouch = .15 + Math.max(0, Math.sin(clock * .7)) * .2;
-    charG.position.x = Math.sin(clock * .8) * .03; RIG.stT = Math.sin(clock * 2.4) * .025; RIG.sniffIdle = Math.max(0, Math.sin(clock * 9)) * (Math.sin(clock * .9) > .5 ? 1 : 0);
-    if (INTRO.ph === 'pull' && t > 4.3) { INTRO.ph = 'wait'; INTRO.farted = false; $('ride').textContent = 'JUMP'; $('ride').classList.add('on'); $('ride').focus({ preventScroll: true }); }
-    windGust(.35 + Math.sin(clock * .6) * .15);
+  if (INTRO.ph === 'glide' || INTRO.ph === 'wait') { // he takes in the city he gassed: slow look left and right, weight shifts, the odd sniff
+    RIG.headYaw = Math.sin(clock * .38) * .5 + Math.sin(clock * 1.1) * .05; RIG.crouch = .12 + Math.max(0, Math.sin(clock * .6)) * .12;
+    charG.position.x = Math.sin(clock * .8) * .02; RIG.stT = Math.sin(clock * 2.2) * .02; RIG.sniffIdle = Math.max(0, Math.sin(clock * 9)) * (Math.sin(clock * .9) > .6 ? 1 : 0);
+    if (INTRO.ph === 'glide') { // quadratic Bézier from the sky, banking as it sweeps in, settling on the painting's POV
+      const k = Math.min(1, t / GLIDE.dur), e = k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2, u = 1 - e;
+      camState.pos.set(0, 0, 0).addScaledVector(GLIDE.a, u * u).addScaledVector(GLIDE.m, 2 * u * e).addScaledVector(AK.pov.pos, e * e);
+      camState.look.lerpVectors(GLIDE.la, AK.pov.look, ease(Math.min(1, k * 1.15))); camState.fov = lerp(GLIDE.fov0, AK.pov.fov, e); camState.roll = Math.sin(e * Math.PI) * .14;
+      if (k >= 1) { INTRO.ph = 'wait'; INTRO.t = 0; camState.roll = 0; }
+    } else { // settled: a breathing handheld camera with a slow push in
+      const push = Math.min(1, t / 14) * .35; camState.pos.copy(AK.pov.pos).lerp(LEDGE, push * .18).add(_fp.set(Math.sin(clock * .53) * .05, Math.sin(clock * .71) * .04, Math.sin(clock * .37) * .05));
+      camState.look.copy(AK.pov.look).add(_fl.set(Math.sin(clock * .29) * .6, Math.sin(clock * .41) * .4, 0)); camState.roll = Math.sin(clock * .33) * .012;
+    }
+    windGust(.3 + Math.sin(clock * .6) * .12);
+  }
+  if (INTRO.ph === 'alert') { // sirens: he snaps round toward the noise, a nervous toot, the camera jolts in
+    const k = clamp(t / .9, 0, 1); RIG.headYaw = lerp(RIG.headYaw ?? 0, -.55, damp(dt, 14)); RIG.crouch = .4 * Math.sin(k * Math.PI);
+    if (t - dt <= 0) { RIG.stv = -4; RIG.squish = .6; post.comp.uniforms.uGlitch.value = .25; }
+    camState.pos.lerpVectors(INTRO.c0, _fp.copy(AK.pov.pos).lerp(LEDGE, .22), ease(k)).add(_fl.set((R01() - .5) * .04 * (1 - k), (R01() - .5) * .04 * (1 - k), 0));
+    camState.look.lerpVectors(INTRO.l0, AK.pov.look, ease(k)); camState.fov = lerp(INTRO.f0v, AK.pov.fov - 4, ease(k)); camState.roll = 0;
+    if (t > .95) { INTRO.ph = 'crouch'; INTRO.t = 0; startMusic(); return; }
   }
   if (INTRO.ph === 'crouch') { // anticipation: sink, lean back, arms back, hood tip flicks
     const k = ease(clamp(t / .55, 0, 1)); RIG.crouch = .15 + k * .9; RIG.stT = -.2 * k + (k > .9 ? Math.sin(t * 60) * .015 : 0); RIG.armsUp = -k * .5; RIG.headYaw = lerp(RIG.headYaw ?? 0, 0, k);
@@ -714,6 +744,12 @@ function clack(v = 1) { const c = out(); if (!c) return; const t0 = c.currentTim
 function whoosh(len = .8) { const c = out(); if (!c) return; const t0 = c.currentTime, s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain(); s.buffer = noise(c); s.loop = true; f.type = 'bandpass'; f.Q.value = 1.2; f.frequency.setValueAtTime(300, t0); f.frequency.exponentialRampToValueAtTime(2800, t0 + len * .8); g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(.35, t0 + len * .4); g.gain.exponentialRampToValueAtTime(.001, t0 + len); s.connect(f).connect(g).connect(SND.out); s.start(t0); s.stop(t0 + len + .05); }
 function chargeSound() { const c = out(); if (!c) return; const t0 = c.currentTime, o = c.createOscillator(), g = c.createGain(), lp = c.createBiquadFilter(); o.type = 'sawtooth'; o.frequency.setValueAtTime(40, t0); o.frequency.linearRampToValueAtTime(70, t0 + .9); lp.type = 'lowpass'; lp.frequency.value = 300; g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(.25, t0 + .8); g.gain.linearRampToValueAtTime(0, t0 + 1); o.connect(lp).connect(g).connect(SND.out); o.start(t0); o.stop(t0 + 1.05); }
 function siren(gainV, rate = .32, center = 900, depth = 320) { const c = SND.ctx, o = c.createOscillator(), lfo = c.createOscillator(), lg = c.createGain(), g = c.createGain(), lp = c.createBiquadFilter(); o.type = 'square'; o.frequency.value = center; lfo.type = 'triangle'; lfo.frequency.value = rate; lg.gain.value = depth; lfo.connect(lg).connect(o.frequency); lp.type = 'lowpass'; lp.frequency.value = 1400; g.gain.value = gainV; o.connect(lp).connect(g).connect(SND.out); o.start(); lfo.start(); return { g, lp, o }; }
+const SIREN = new Audio(); SIREN.preload = 'auto'; SIREN.loop = true; SIREN.src = 'assets/audio/siren.mp3';
+function sirenAlarm() { // ENTER: a real siren, close and loud, then it settles under the chase
+  const c = SND.ctx; if (!c) return; if (!SND.alarm) { SND.alarm = c.createGain(); c.createMediaElementSource(SIREN).connect(SND.alarm).connect(SND.out); }
+  const g = SND.alarm.gain, n = c.currentTime; g.cancelScheduledValues(n); g.setValueAtTime(1.2, n); g.setValueAtTime(1.2, n + 4.5); g.linearRampToValueAtTime(.22, n + 9);
+  SIREN.currentTime = 0; SIREN.play().catch(() => {});
+}
 function sirenFar() { const c = SND.ctx; if (!c || SND.far) return; SND.far = siren(0, .3); SND.far.lp.frequency.value = 600; SND.far.g.gain.linearRampToValueAtTime(.05, c.currentTime + 3); }
 function startChaseAudio() {
   const c = SND.ctx; if (!c || SND.chase) return; SND.chase = true; if (SND.far) SND.far.g.gain.setTargetAtTime(0, c.currentTime, .3);
@@ -729,11 +765,22 @@ function stepAudio(dt) { const c = out(); if (!c || !SND.chase) return; const sk
 
 /* ================================================================== camera, hover, render loop */
 const _look = V3(), _f = V3(), _hn = V3();
+const CINE = { k: 0 }, _up = new THREE.Vector3(0, 1, 0);
 function updateCamera(dt) {
   const k = damp(dt, 5); if (!REDUCED) { ptr.cx = lerp(ptr.cx, ptr.seen ? ptr.x : 0, k); ptr.cy = lerp(ptr.cy, ptr.seen ? ptr.y : 0, k); }
   cam.position.copy(camState.pos); cam.position.x += ptr.cx * .35 * camState.par; cam.position.y += -ptr.cy * .15 * camState.par;
   const wob = REDUCED ? 0 : .004; cam.position.x += Math.sin(clock * .9) * wob; cam.position.y += Math.sin(clock * 1.3 + 1) * wob + (GAL.sky || INTRO.on ? 0 : skater.position.y * .4);
-  _look.copy(camState.look); cam.lookAt(_look); cam.rotateZ(camState.roll);
+  _look.copy(camState.look);
+  // cinematic layer on the street: a slow orbiting arc around him, dolly and crane breathing, pans that follow his weave, handheld micro-shake
+  const cin = CINE.k = lerp(CINE.k, (!INTRO.on && !GAL.sky && !travel && !REDUCED && started) ? 1 : 0, damp(dt, 1.5));
+  if (cin > .001) {
+    const a = (Math.sin(clock * .11) * .2 + Math.sin(clock * .047 + 1) * .12) * cin, dl = 1 + (Math.sin(clock * .13) * .09 + Math.sin(clock * .31) * .03) * cin;
+    _f.subVectors(cam.position, _look); _f.applyAxisAngle(_up, a).multiplyScalar(dl); cam.position.copy(_look).add(_f);
+    cam.position.y += (Math.sin(clock * .09) * .22 + Math.sin(clock * .23) * .06) * cin;
+    _look.z += (skater.position.z - LANE) * .55 * cin; _look.y += Math.sin(clock * .17) * .05 * cin;
+    cam.position.x += (Math.sin(clock * 3.1) * .006 + Math.sin(clock * 5.3) * .003) * cin; cam.position.y += (Math.sin(clock * 3.7 + 2) * .005 + Math.sin(clock * 6.1) * .002) * cin;
+  }
+  cam.lookAt(_look); cam.rotateZ(camState.roll + Math.sin(clock * .21) * .012 * cin);
   cam.fov = camState.fov * (cam.aspect < 1 ? 1.45 : 1); cam.updateProjectionMatrix();
   if (cam.aspect < 1) { _f.subVectors(cam.position, _look).multiplyScalar(.15); cam.position.add(_f); }
 }
@@ -747,7 +794,7 @@ function tick(dt) {
   const cu = post.comp.uniforms; if (cu.uGlitch.value > 0) cu.uGlitch.value = Math.max(0, cu.uGlitch.value - dt * .8); cu.uT.value = clock;
   if (GASOUT.t >= 0) { GASOUT.t += dt; cu.uGas.value = Math.max(0, 1 - GASOUT.t / 1.4); if (GASOUT.t > 1.4) GASOUT.t = -1; }
   cu.uZoom.value = lerp(cu.uZoom.value, GAL.sky ? .8 : GAL.on && GAL.t > .7 ? .9 : 0, damp(dt, 3));
-  if (INTRO.on) { stepIntro(dt); poseRider(dt, 'alley'); } else { stepTravel(dt); stepStreet(dt); stepGallery(dt); poseRider(dt, GAL.sky ? 'sky' : 'street'); stepAudio(dt); }
+  if (INTRO.on) { stepIntro(dt); poseRider(dt, 'alley'); } else { stepTravel(dt); stepStreet(dt); if (!GAL.sky) stepSmog(dt); stepGallery(dt); poseRider(dt, GAL.sky ? 'sky' : 'street'); stepAudio(dt); }
   GAS.step(dt, clock); stepCling();
   updateCamera(dt);
   headTop.getWorldPosition(_hn); focus = lerp(focus, cam.position.distanceTo(_hn), damp(dt, 6));
@@ -756,9 +803,8 @@ function tick(dt) {
 document.addEventListener('visibilitychange', () => { if (document.hidden) { cancelAnimationFrame(raf); SND.ctx?.suspend(); } else { last = performance.now(); raf = requestAnimationFrame(frame); SND.ctx?.resume(); } });
 
 /* ================================================================== gate, links, input */
-const setWord = w => { $('gword').textContent = w === 'ENTER' ? '\u25B6 PRESS ENTER' : 'LOADING\u2026'; $('enter').setAttribute('aria-label', w === 'ENTER' ? 'Enter' : 'Loading'); };
+const setWord = w => { $('gword').textContent = w === 'ENTER' ? 'Enter' : 'Loading'; $('enter').setAttribute('aria-label', w === 'ENTER' ? 'Enter' : 'Loading'); };
 setWord('LOADING');
-dispatchLog(0);
 { const c = document.createElement('canvas'); c.width = c.height = 160; const x = c.getContext('2d'), d = x.createImageData(160, 160); for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; } x.putImageData(d, 0, 0); $('grain').style.background = `url(${c.toDataURL()})`; }
 const t0 = performance.now();
 Promise.all([sniffReady, boardReady, copReady, urbReady]).catch(e => { console.error(e); $('prog').textContent = 'a model failed to load'; }).then(() => {
@@ -766,11 +812,13 @@ Promise.all([sniffReady, boardReady, copReady, urbReady]).catch(e => { console.e
   for (const k in prog) prog[k] = 1; showProg();
   setTimeout(() => { setWord('ENTER'); $('enter').disabled = false; $('enter').focus({ preventScroll: true }); if (Q.has('shot') || Q.has('intro')) begin(true); }, Q.has('shot') || Q.has('intro') ? 0 : Math.max(0, 1800 - (performance.now() - t0)));
 });
+// the rooftop runs behind the loading screen: the camera glides in from the sky while the models load
+if (!Q.has('shot') && !REDUCED) startIntro();
 function begin(debug) {
   if (started) return; started = true; $('gate').classList.add('off'); if (debug) $('gate').style.display = 'none';
-  if (Q.has('intro')) { startIntro(); const T_ = +Q.get('intro'); if (T_ > 0) { INTRO.ph = 'wait'; rideClick(); for (let i = 0; i < T_ * 30; i++) tick(1 / 30); } return; }
-  if (debug || REDUCED) { go(station, true); $('ui').classList.add('on'); return; }
-  startIntro();
+  if (Q.has('intro')) { const T_ = +Q.get('intro'); if (T_ > 0) { rideClick(); for (let i = 0; i < T_ * 30; i++) tick(1 / 30); } return; }
+  if (debug || REDUCED || !INTRO.on) { go(station, true); $('ui').classList.add('on'); return; }
+  rideClick();
 }
 $('enter').addEventListener('click', () => { audioInit(); begin(false); });
 $('ride').addEventListener('click', () => { audioInit(); rideClick(); });
@@ -786,8 +834,7 @@ addEventListener('touchend', e => { if (ty0 === null || !started || INTRO.on) re
 for (const ev of ['pointermove', 'pointerdown']) addEventListener(ev, e => { ptr.x = e.clientX / innerWidth * 2 - 1; ptr.y = e.clientY / innerHeight * 2 - 1; ptr.seen = true; });
 document.addEventListener('pointerleave', () => { ptr.seen = false; });
 cvs.addEventListener('click', () => { if (HOVER.k > .5) { audioInit(); fartBurst(40, 1.3); RIG.sniff = 0; RIG.sniffed = false; } });
-for (const [k, label] of [['x', 'X'], ['telegram', 'TG'], ['chart', 'Chart'], ['buy', 'Buy']]) { const a = document.createElement(SITE[k] ? 'a' : 'span'); a.className = 'btn'; a.textContent = label; if (SITE[k]) { a.href = SITE[k]; a.target = '_blank'; a.rel = 'noopener noreferrer'; } else { a.setAttribute('aria-disabled', 'true'); a.title = 'Coming soon'; } $('links').append(a); }
-$('tick').textContent = SITE.ticker;
+for (const [k, label] of [['x', 'X'], ['telegram', 'TG'], ['chart', 'Chart'], ['buy', 'Buy']]) { const a = document.createElement(SITE[k] ? 'a' : 'span'); a.className = 'btn nes-btn is-success'; a.textContent = label; if (SITE[k]) { a.href = SITE[k]; a.target = '_blank'; a.rel = 'noopener noreferrer'; } else { a.setAttribute('aria-disabled', 'true'); a.title = 'Coming soon'; } $('links').append(a); }
 if (SITE.ca) { const code = document.createElement('code'); code.textContent = SITE.ca; const b = document.createElement('button'); b.className = 'ca-copy'; b.type = 'button'; b.textContent = 'Copy'; b.onclick = async () => { try { await navigator.clipboard.writeText(SITE.ca); b.textContent = 'Copied'; } catch { b.textContent = 'Ctrl+C'; } setTimeout(() => { b.textContent = 'Copy'; }, 1500); }; $('ca').replaceChildren(code, b); }
 
 window.__sn = { REST, ABT, RIG, THREE, R, scene, roof, cam, camState, BONES, skater, charG, boardG, cops, traffic, GAS, CLOUDS, GAL, INTRO, STATIONS, go, tick, fartBurst, post, get station() { return station; } };
