@@ -63,12 +63,24 @@ Include the negative prompt and parameters where the model uses them, and the st
 apply (FLUX.2 refs, USO, IP-Adapter style, `--sref`/`--sw`, gpt-image/Nano Banana with the image attached).
 A reference image usually transfers style better than any text; recommend using both.
 
-## Step 5 — Generate (only if a generation tool is available)
-Check your tools for an image-generation MCP (ComfyUI, fal, Replicate, BFL, Gemini/OpenAI image). If one exists
-and the user wants it, generate 3-4 seeds per prompt variant, passing the reference image as a style reference
-where the tool supports it. Save outputs into `WORK/round1/`. If there is no generation tool, give the user the
-prompts and ask them to drop their results into a folder; then continue with Step 6. (`references/tools.md`
-lists options to suggest, including the Midjourney caveat.)
+## Step 5 — Generate (only if the user wants it; it costs money)
+**fal.ai is set up** (`scripts/generate_fal.py`, key injected by the environment). Tell the user how many images
+you'll make before running (each is billed to their fal account), then for each prompt variant:
+```bash
+python3 -I scripts/generate_fal.py --model flux2 --ref IMAGE --prompt-file WORK/prompt_a.txt \
+  --n 4 --aspect W:H --out WORK/round1 --name a
+```
+- `--model flux2` (FLUX.2, best for carrying a style from references; up to 4 images per call) or `--model nano`
+  (Nano Banana Pro, best at following detailed instructions and text). `--ref` switches to the edit/reference
+  endpoint; pass the original image, plus extra on-style images if the user has them.
+- With a reference, say in the prompt what to take from it ("in the exact visual style of the reference image:
+  same rendering, palette, lighting") and what to change (the new subject), or it may copy the content too.
+- Fix `--seed` when comparing prompt changes so differences come from the prompt, not the seed.
+- `--schema fal-ai/flux-2/edit` prints an endpoint's fields; any other fal endpoint works via `--endpoint` + `--extra`.
+- Errors: "no credit" → user must top up at fal.ai/dashboard/billing; 401/403 → key missing or wrong.
+Other generators: if an image-generation MCP is connected (ComfyUI, Replicate, BFL, Gemini/OpenAI), it can be used
+the same way. With no generator, give the user the prompts and ask them to drop results into `WORK/round1/`.
+Midjourney has no API: give `--sref`/`--sw` prompts to paste. (`references/tools.md` lists options.)
 
 ## Step 6 — Compare and refine (max 3 rounds)
 ```bash

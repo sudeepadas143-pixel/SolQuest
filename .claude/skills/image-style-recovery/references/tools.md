@@ -8,7 +8,7 @@ generation or deeper analysis. Status as researched on 2026-11-26 (see reports/A
 |---|---|---|
 | artokun/comfyui-mcp | Drive a local ComfyUI: generate, view outputs, recover embedded workflows | Most complete; also a Claude Code plugin with model-specific prompting skills |
 | Comfy-Org/comfy-mcp | Official ComfyUI MCP (beta), local or Comfy Cloud | |
-| fal MCP (mcp.fal.ai) | Hosted FLUX.2, Nano Banana, Qwen-Image, etc. | OAuth, pay per image |
+| fal.ai via scripts/generate_fal.py | FLUX.2 and Nano Banana Pro, with reference images | **Set up in the SolQuest environment** (key saved as a network secret for fal.run). Pay per image |
 | Replicate MCP (mcp.replicate.com) | Hosted models incl. Flux and captioners | |
 | Black Forest Labs MCP | FLUX.2 with multiple reference images | Listed in MCP directories; confirm on bfl.ai before relying on it |
 | shinpr/mcp-image | Gemini / OpenAI / Seedream image generation | No style-reference parameter |
