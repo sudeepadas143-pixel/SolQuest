@@ -293,7 +293,11 @@ function poseRider(dt, mode) {
   for (const k in BONES) { BONES[k].quaternion.copy(REST[k].q); BONES[k].scale.copy(REST[k].s); }
   const t = clock, b = REDUCED ? .3 : 1;
   RIG.squish = Math.max(0, RIG.squish - dt * 3.5); const sq = Math.sin(RIG.squish * Math.PI) * .1;
-  charG.scale.set(CS * (1 + sq * .5), CS * (1 - sq - RIG.crouch * .08), CS * (1 + sq * .5));
+  // squash & stretch on an underdamped spring (overshoots like a rubber toy); volume-preserving: thin when tall, fat when squashed
+  RIG.st ??= 0; RIG.stv ??= 0; RIG.stT ??= 0;
+  for (let i = 0; i < 3; i++) { const h = dt / 3; RIG.stv += (-170 * (RIG.st - RIG.stT) - 11 * RIG.stv) * h; RIG.st += RIG.stv * h; }
+  const st = clamp(RIG.st, -.45, .5), w = 1 / Math.sqrt(1 + st);
+  charG.scale.set(CS * (1 + sq * .5) * w, CS * (1 + st - sq - RIG.crouch * .08), CS * (1 + sq * .5) * w);
   charG.rotation.x = RIG.lean * .3 + RIG.crouch * .1 - .04 + Math.sin(t * 2.2) * .012 * b; // lean the whole toy, not the robe
   charG.position.y = (mode !== 'alley' || INTRO.ph === 'land') ? DECK + Math.sin(t * 9) * .004 * b : 0; // on the ledge he stands on concrete, not the deck
   charG.updateMatrixWorld(true);
@@ -325,11 +329,11 @@ function stepStreet(dt) {
   RIG.lastZ = z; RIG.lastVz = vz; RIG.lean = lerp(RIG.lean, clamp(az * .05, -.28, .28), damp(dt, 4));
   skater.position.z = z; skater.rotation.y = -Math.atan2(vz, SPEED); skater.rotation.x = RIG.lean * .6;
   RIG.nextOllie -= dt;
-  if (RIG.ollie < 0 && RIG.nextOllie < 0 && !GAL.on && HOVER.k < .1 && !REDUCED) { RIG.ollie = 0; RIG.nextOllie = 5 + R01() * 5; clack(.7); }
+  if (RIG.ollie < 0 && RIG.nextOllie < 0 && !GAL.on && HOVER.k < .1 && !REDUCED) { RIG.ollie = 0; RIG.nextOllie = 5 + R01() * 5; clack(.7); RIG.stv = 5; }
   if (RIG.ollie >= 0) {
     RIG.ollie += dt; const u = RIG.ollie / .62;
     skater.position.y = .55 * 4 * u * (1 - u); boardG.rotation.z = u < .3 ? Math.sin(u / .3 * Math.PI) * .4 : 0; RIG.armsUp = Math.sin(u * Math.PI) * .5; RIG.crouch = u < .15 ? 1 - u / .15 : 0;
-    if (u >= 1) { RIG.ollie = -1; skater.position.y = 0; boardG.rotation.z = 0; RIG.armsUp = 0; clack(1); RIG.squish = .6; }
+    if (u >= 1) { RIG.ollie = -1; skater.position.y = 0; boardG.rotation.z = 0; RIG.armsUp = 0; clack(1); RIG.squish = .6; RIG.stv = -5; }
   } else skater.position.y = Math.abs(Math.sin(t * 13)) * .006 * b;
   skater.userData.d = dist;
   if (!GAL.sky) { RIG.trail += dt * (MOBILE ? 18 : 30); buttWorld(); for (; RIG.trail >= 1; RIG.trail--) { const k = R01(); GAS.emit(_bp.x + (R01() - .5) * .12, _bp.y + (R01() - .5) * .14, _bp.z + (R01() - .5) * .1, { vx: -R01() * 6, vy: .05 + R01() * .45, vz: _bd.z * (.4 + R01()) + (R01() - .5) * 1.2, life: .7 + R01() * .9, s0: .03, s1: .06 + k * k * .26, heat: .5 + R01() * .4 }); } }
@@ -551,26 +555,26 @@ function startIntro() {
   windStart();
 }
 function rideClick() { if (INTRO.ph !== 'wait') return; $('ride').classList.remove('on'); startMusic(); INTRO.ph = 'crouch'; INTRO.t = 0; }
-const _fp = V3(), _fl = V3();
+const _fp = V3(), _fl = V3(), _cpo = V3(), _clo = V3();
 function stepIntro(dt) {
   INTRO.t += dt; const t = INTRO.t; RCLOUD.P.forEach((p, i) => { p.x = p.bx + Math.sin(clock * .05 + i) * 1.5; }); RCLOUD.step(0, clock);
   if (INTRO.ph === 'pull' || INTRO.ph === 'wait') { // peering over the edge in the wind: weight shifts, looks around, leans to look down
     stepCamKey(dt); RIG.headYaw = Math.sin(clock * .45) * .35 + Math.sin(clock * 1.3) * .05; RIG.crouch = .15 + Math.max(0, Math.sin(clock * .7)) * .2;
-    charG.position.x = Math.sin(clock * .8) * .03; RIG.sniffIdle = Math.max(0, Math.sin(clock * 9)) * (Math.sin(clock * .9) > .5 ? 1 : 0);
+    charG.position.x = Math.sin(clock * .8) * .03; RIG.stT = Math.sin(clock * 2.4) * .025; RIG.sniffIdle = Math.max(0, Math.sin(clock * 9)) * (Math.sin(clock * .9) > .5 ? 1 : 0);
     if (INTRO.ph === 'pull' && t > 4.3) { INTRO.ph = 'wait'; INTRO.farted = false; $('ride').textContent = 'JUMP'; $('ride').classList.add('on'); $('ride').focus({ preventScroll: true }); }
     windGust(.35 + Math.sin(clock * .6) * .15);
   }
   if (INTRO.ph === 'crouch') { // anticipation: sink, lean back, arms back, hood tip flicks
-    const k = ease(clamp(t / .55, 0, 1)); RIG.crouch = .15 + k * .9; RIG.armsUp = -k * .5; RIG.headYaw = lerp(RIG.headYaw ?? 0, 0, k);
+    const k = ease(clamp(t / .55, 0, 1)); RIG.crouch = .15 + k * .9; RIG.stT = -.32 * k + (k > .9 ? Math.sin(t * 60) * .015 : 0); RIG.armsUp = -k * .5; RIG.headYaw = lerp(RIG.headYaw ?? 0, 0, k);
     skater.rotation.x = -k * .18; windGust(.5);
-    if (t > .6) { INTRO.ph = 'leap'; INTRO.t = 0; RIG.squish = 0; whoosh(1.2); clack(.3); return; }
+    if (t > .6) { INTRO.ph = 'leap'; INTRO.t = 0; RIG.squish = 0; RIG.stv = 7; RIG.stT = .26; whoosh(1.2); clack(.3); return; }
   }
   if (INTRO.ph === 'leap') { // spring up and out over the edge, body stretched
     const k = clamp(t / .5, 0, 1); RIG.crouch = Math.max(0, 1 - k * 4) * 1.05; RIG.armsUp = .9 * Math.sin(Math.min(1, k * 1.5) * Math.PI / 2);
     skater.position.copy(LEDGE).addScaledVector(FWD, k * 3.2).y += Math.sin(k * Math.PI) * 1.5; skater.rotation.x = lerp(-.18, .55, ease(k));
-    charG.scale.y = CS * (1 + Math.sin(k * Math.PI) * .12);
-    camState.look.lerp(_fl.copy(skater.position).add(_fp.set(0, -6, -6)), damp(dt, 5));
-    if (t >= .5) { INTRO.ph = 'fall'; INTRO.t = 0; INTRO.f0 = skater.position.clone(); fallSound(); return; }
+    RIG.stT = lerp(.26, .12, k);
+    _fl.copy(skater.position).addScaledVector(FWD, 2.5).y -= 1.2; camState.look.lerp(_fl, damp(dt, 9)); _fp.copy(skater.position).addScaledVector(FWD, -3.4).addScaledVector(RGT, 1.1).y += 2.6; camState.pos.lerp(_fp, damp(dt, 3.5)); camState.fov = lerp(camState.fov, 55, damp(dt, 3));
+    if (t >= .5) { INTRO.ph = 'fall'; INTRO.t = 0; INTRO.f0 = skater.position.clone(); INTRO.blend = true; INTRO.cp0 = camState.pos.clone(); INTRO.cl0 = camState.look.clone(); fallSound(); return; }
   }
   if (INTRO.ph === 'fall') { // the dive: gravity-accelerated drop between the towers, arms spread, then a forward flip to land feet-first
     const D = 2.5, u = clamp(t / D, 0, 1), f0 = INTRO.f0;
@@ -578,14 +582,16 @@ function stepIntro(dt) {
     const flip = clamp((u - .62) / .3, 0, 1); // dive at ~70° → forward flip (2π) → upright
     skater.rotation.x = lerp(.55, 1.2, Math.min(1, u / .5)) * (1 - ease(flip)) + ease(flip) * Math.PI * 2 * (1 - Math.pow(1 - flip, 2)) * 0 + (flip > 0 ? ease(flip) * Math.PI * 2 : 0);
     skater.rotation.z = Math.sin(u * 9) * .06 * (1 - flip);
-    RIG.armsUp = flip < 1 ? .9 - flip * .6 : .3; RIG.crouch = flip * .7;
+    RIG.armsUp = flip < 1 ? .9 - flip * .6 : .3; RIG.crouch = flip * .7; RIG.stT = .14 * (1 - flip) - .24 * Math.sin(flip * Math.PI) + (flip >= 1 ? .08 : 0);
     if (R01() < dt * 14) { buttWorld(); GAS.emit(_bp.x, _bp.y, _bp.z, { vx: 0, vy: 6, vz: 0, life: .8, s0: .04, s1: .14, heat: 1, drag: 3 }); } // nervous toots stream up
     _fp.copy(skater.position); // chase camera: above-behind, swinging low and to the side for the landing
     const sideK = ease(clamp((u - .55) / .45, 0, 1));
     camState.pos.copy(_fp).addScaledVector(FWD, -lerp(3.4, 2.6, sideK)).addScaledVector(RGT, lerp(1.1, 4.2, sideK)).y += lerp(2.8, 1.1, sideK);
-    camState.look.copy(_fp).addScaledVector(FWD, lerp(3, 0, sideK)).y -= lerp(2.6, -.4, sideK); camState.fov = lerp(55, 44, sideK); camState.ap = .2;
+    camState.look.copy(_fp).addScaledVector(FWD, lerp(3, 0, sideK)).y -= lerp(2.6, -.4, sideK);
+    if (INTRO.blend) { INTRO.blend = false; _cpo.copy(INTRO.cp0).sub(camState.pos); _clo.copy(INTRO.cl0).sub(camState.look); } // ease out of the leap camera
+    const bk = 1 - ease(clamp(t / .45, 0, 1)); camState.pos.addScaledVector(_cpo, bk); camState.look.addScaledVector(_clo, bk); camState.fov = lerp(55, 44, sideK); camState.ap = .2;
     windGust(.4 + u * .8);
-    if (u >= 1) { INTRO.ph = 'land'; INTRO.t = 0; skater.rotation.set(0, FACE, 0); skater.position.copy(LAND); streetBoard.visible = false; boardG.visible = true; RIG.squish = 1; RIG.crouch = 1; landSound(); windGust(.1);
+    if (u >= 1) { INTRO.ph = 'land'; INTRO.t = 0; skater.rotation.set(0, FACE, 0); skater.position.copy(LAND); streetBoard.visible = false; boardG.visible = true; RIG.squish = 1; RIG.crouch = 1; RIG.stT = 0; RIG.stv = -8; landSound(); windGust(.1);
       for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; GAS.emit(LAND.x + Math.cos(a) * .4, .1, LAND.z + Math.sin(a) * .4, { vx: Math.cos(a) * 3, vy: .4, vz: Math.sin(a) * 3, life: .9, s0: .05, s1: .22, heat: 0, drag: 3 }); } return; }
   }
   if (INTRO.ph === 'land') { // impact squash → recover → first proper fart
@@ -601,7 +607,7 @@ function endIntro() {
   if (!INTRO.on) return; INTRO.on = false; INTRO.ph = 'off'; $('ride').classList.remove('on');
   scene.add(skater); GAS.attach(scene); CLING.attach(scene); CLING.setFog(SKY.hor, 40, 130); CLING.uniforms.uAmb.value.setRGB(1, 1, 1); GAS.clear(); GAS.air.set(-SPEED, 0, 0); GAS.setFog(SKY.hor, 40, 130); GAS.uniforms.uAmb.value.setRGB(1, 1, 1);
   skater.position.set(0, 0, LANE); skater.rotation.set(0, 0, 0, 'XYZ'); boardG.position.set(0, 0, 0); boardG.rotation.set(0, 0, 0); boardG.visible = true; charG.position.set(0, DECK, 0); charG.rotation.set(0, 0, 0);
-  RIG.crouch = RIG.armsUp = 0; RIG.headYaw = null; RIG.sniffIdle = 0; windStop();
+  RIG.crouch = RIG.armsUp = 0; RIG.stT = RIG.st = RIG.stv = 0; RIG.headYaw = null; RIG.sniffIdle = 0; windStop();
   station = -1; lockUntil = 0; go(0, true); $('ui').classList.add('on'); startChaseAudio();
   post.comp.uniforms.uGlitch.value = 1; post.comp.uniforms.uGas.value = 1; GASOUT.t = 0;
 }
