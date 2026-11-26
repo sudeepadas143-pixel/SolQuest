@@ -256,7 +256,7 @@ def style_stats(img):
     g = np.asarray(gray).astype(np.float32)
     edges = np.asarray(gray.filter(ImageFilter.FIND_EDGES)).astype(np.float32)
     lap = np.abs(g[1:-1, 1:-1] * 4 - g[:-2, 1:-1] - g[2:, 1:-1] - g[1:-1, :-2] - g[1:-1, 2:])
-    flat = g[1:-1, 1:-1][edges[1:-1, 1:-1] < 8]
+    flat = lap[edges[1:-1, 1:-1] < 8]  # Laplacian response inside flat areas = local grain/noise
     hint = COMMON.get((w, h))
     if not hint and w % 64 == 0 and h % 64 == 0: hint = "multiple of 64 (typical of diffusion output, not proof)"
     sat = hsv[..., 1]
@@ -269,9 +269,9 @@ def style_stats(img):
         "warmth_r_minus_b": round(float((arr[..., 0] - arr[..., 2]).mean()), 3),
         "edge_density": round(float((edges > 32).mean()), 3),
         "sharpness_laplacian": round(float(lap.mean()), 2),
-        "flat_area_noise": round(float(flat.std()) if flat.size else 0.0, 2),
+        "flat_area_noise": round(float(np.median(flat)) if flat.size else 0.0, 2),
         "reading_guide": "edge_density high + sharpness high = crisp linework/detail; low = soft/painterly. "
-                         "flat_area_noise > ~6 suggests film grain or added noise. warmth > 0 warm, < 0 cool.",
+                         "flat_area_noise ~0-2 clean/smooth, 3-6 light texture, > ~6 visible grain or noise. warmth > 0 warm, < 0 cool.",
     }
 
 
@@ -288,7 +288,10 @@ def save_crops(img, out_dir, stem):
 # ---------------------------------------------------------------- main
 def inspect(path, crops=None):
     data = Path(path).read_bytes()
-    img = Image.open(path); img.load()
+    try:
+        img = Image.open(path); img.load()
+    except Exception as e:
+        sys.exit(f"Cannot read image {path}: {e} (truncated or unsupported file; ask for the original)")
     rep = {"file": str(path), "format": img.format, "mode": img.mode, "bytes": len(data)}
     found = []
     chunks = [t for t, _ in png_chunks(data)]
