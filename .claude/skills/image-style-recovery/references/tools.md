@@ -18,12 +18,13 @@ generation or deeper analysis. Status as researched on 2026-11-26 (see reports/A
 | Tool | Use |
 |---|---|
 | exiftool | `exiftool -j -a -G1 IMAGE` dumps every metadata field the script doesn't parse |
-| c2patool / contentauth c2pa-mcp | Verify Content Credentials properly (signer, actions, AI ingredient) |
+| c2pa-python (`pip install c2pa-python`) | Used automatically by inspect_image.py to read/validate Content Credentials |
+| c2patool / contentauth c2pa-mcp | Same from the command line / as an MCP tool |
 | SD Prompt Reader (receyuki) | GUI/CLI reader for many generator formats; cross-check the script |
 | JoyCaption Beta One, Qwen3-VL | Better long captions for Flux-style prompts, run locally (ComfyUI nodes exist) |
 | WD v3 tagger / Camie tagger | Danbooru tags for Pony/Illustrious/NoobAI prompts |
 | Hugging Face MCP (hf-mcp-server) | Call captioner/tagger Spaces as tools |
-| `pip install torch transformers` | Enables `compare_images.py --deep` (CLIP image similarity) |
+| `pip install torch --index-url https://download.pytorch.org/whl/cpu` + `pip install transformers` | Enables `compare_images.py --deep` (CLIP image similarity); needs huggingface.co reachable for the model |
 | Gemini app SynthID check | Tells you if an image came from Google's generators (Google images only) |
 
 ## Known limits

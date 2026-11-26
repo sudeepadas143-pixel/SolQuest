@@ -37,8 +37,10 @@ Read `summary` first.
   - ComfyUI: drag the *original file* onto the canvas to get the whole workflow back.
   - Model hash / LoRA names: search them on Civitai to find the exact checkpoint.
   Then jump to Step 6 only if they also want variations.
-- `c2pa` present → provenance only (which service/app), not a prompt. Suggest `c2patool` or
-  contentcredentials.org/verify to read the signed manifest. `xmp.ai_source_flag` = the file declares itself AI.
+- `c2pa` present → provenance only (which service/app), not a prompt. With `c2pa-python` installed the script
+  reads the signed manifest: `claim_generator` (the app/service), `actions` (e.g. `c2pa.created` with
+  `trainedAlgorithmicMedia` = AI-generated), `signature.issuer`, and `validation_state`. A
+  `signingCredential.untrusted` error means the signer isn't on the C2PA trust list, not that the file is fake. `xmp.ai_source_flag` = the file declares itself AI.
 - Nothing found → continue. `style_stats` (palette, tone, saturation, warmth, texture, resolution hint) feeds
   Step 2. If `exiftool` is installed, also run `exiftool -j -a -G1 IMAGE` for anything the script doesn't parse.
 
@@ -72,8 +74,9 @@ lists options to suggest, including the Midjourney caveat.)
 ```bash
 python3 -I scripts/compare_images.py IMAGE WORK/round1 --sheet WORK/round1_sheet.png [--deep]
 ```
-- `style` = palette, tone, saturation, warmth, texture match. `composition` = layout match. `deep` = CLIP
-  similarity if torch+transformers are installed.
+- `style` = palette, tone, saturation, warmth, texture match. `composition` = layout match. `deep_clip` =
+  CLIP image similarity (needs torch + transformers; first run downloads ~600 MB from huggingface.co). Prefer
+  `--deep` when available: it holds up when lighting changes, where the colour-based `style` score drops.
 - **Always open the sheet and judge by eye too.** The heuristic is colour/tone based: the same rendering style
   under different lighting can score low, and a palette match with the wrong medium can score high.
 - Check the visual anchors one by one on the best candidates. Change only what missed (use `hints`, e.g.

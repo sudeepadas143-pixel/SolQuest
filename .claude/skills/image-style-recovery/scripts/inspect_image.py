@@ -228,10 +228,10 @@ def c2pa_info(data, chunks_types):
     if not has:
         return None
     gens = sorted({k.decode() for k in KNOWN if k in data})
-    cg = re.findall(rb"claim_generator[^\x20-\x7e]{0,8}([\x20-\x7e]{3,120})", data)
+    cg = [c for c in re.findall(rb"claim_generator[^\x20-\x7e]{0,8}([\x20-\x7e]{3,120})", data) if not c.startswith(b"_")]
     return {"present": True, "vendor_strings_seen": gens,
             "claim_generator_hint": [c.decode("latin-1") for c in cg[:3]],
-            "verify_with": "c2patool IMAGE  (or upload to https://contentcredentials.org/verify)"}
+            "verify_with": "manifest below (c2pa-python), c2patool, or https://contentcredentials.org/verify"}
 
 
 # ---------------------------------------------------------------- style statistics
@@ -337,7 +337,25 @@ def inspect(path, crops=None):
     xmp = xmp_info(data)
     if xmp: rep["xmp"] = xmp
     c2 = c2pa_info(data, chunks)
-    if c2: rep["c2pa"] = c2; found.append("C2PA Content Credentials (provenance, not a prompt)")
+    if c2:
+        try:  # optional: pip install c2pa-python → read and validate the signed manifest properly
+            import c2pa
+            r = c2pa.Reader(str(path))
+            m = json.loads(r.json()); r.close()
+            act = m.get("manifests", {}).get(m.get("active_manifest", ""), {})
+            c2["manifest"] = {"claim_generator": act.get("claim_generator") or act.get("claim_generator_info"),
+                              "signature": act.get("signature_info"), "title": act.get("title"),
+                              "assertions": [a.get("label") for a in act.get("assertions", [])],
+                              "validation_state": m.get("validation_state"),
+                              "validation_errors": [v.get("code") for v in m.get("validation_status", []) or []][:10]}
+            c2.pop("claim_generator_hint", None)
+            c2["actions"] = [a for x in act.get("assertions", []) if str(x.get("label", "")).startswith("c2pa.actions")
+                             for a in (x.get("data", {}).get("actions") or [])][:10]
+        except ImportError:
+            c2["manifest"] = "install c2pa-python to read and validate the signed manifest"
+        except Exception as e:
+            c2["manifest"] = f"could not read manifest: {e}"
+        rep["c2pa"] = c2; found.append("C2PA Content Credentials (provenance, not a prompt)")
     if xmp and xmp.get("ai_source_flag"): found.append("IPTC DigitalSourceType = AI-generated")
     rep["style_stats"] = style_stats(img)
     if crops: rep["crops"] = save_crops(img, crops, Path(path).stem)

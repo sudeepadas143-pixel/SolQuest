@@ -102,6 +102,8 @@ def hints(r, c):
 
 
 def deep_scores(ref, cands):
+    import os
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")  # plain HTTPS download; Xet storage hosts are often blocked by proxies
     try:
         import torch
         from transformers import CLIPModel, CLIPProcessor
@@ -111,6 +113,8 @@ def deep_scores(ref, cands):
     model, proc = CLIPModel.from_pretrained(name), CLIPProcessor.from_pretrained(name)
     with torch.no_grad():
         emb = model.get_image_features(**proc(images=[Image.open(p).convert("RGB") for p in [ref, *cands]], return_tensors="pt"))
+    if not torch.is_tensor(emb):  # transformers v5 returns a model output; the projected embedding is pooler_output
+        emb = emb.image_embeds if getattr(emb, "image_embeds", None) is not None else emb.pooler_output
     emb = emb / emb.norm(dim=-1, keepdim=True)
     return [round(float(emb[0] @ emb[i + 1]) * 100, 1) for i in range(len(cands))], None
 
