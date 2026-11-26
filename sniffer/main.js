@@ -215,8 +215,8 @@ function spinWheels(root, re, owner) { root.traverse(o => { if (!re.test(o.name)
 /* ================================================================== SNIFFER on his board */
 const skater = new THREE.Group(); skater.rotation.order = 'YXZ'; skater.position.set(0, 0, LANE); scene.add(skater);
 const boardG = new THREE.Group(), charG = new THREE.Group(); skater.add(boardG, charG);
-const DECK = .1; charG.position.y = DECK;
-const butt = new THREE.Object3D(); butt.position.set(0, .2, -.3); charG.add(butt);
+const DECK = .1, CS = .78; charG.position.y = DECK; charG.scale.setScalar(CS); // CS: Meshy model scale on the board
+const butt = new THREE.Object3D(); butt.position.set(0, .26, -.38); charG.add(butt);
 const headTop = new THREE.Object3D(); headTop.position.set(0, .7, 0); charG.add(headTop);
 const BONES = {}, REST = {};
 const sniffReady = load('assets/models/sniffer.glb', 'sn').then(g => {
@@ -289,25 +289,26 @@ function poseRider(dt, mode) {
   for (const k in BONES) { BONES[k].quaternion.copy(REST[k].q); BONES[k].scale.copy(REST[k].s); }
   const t = clock, b = REDUCED ? .3 : 1;
   RIG.squish = Math.max(0, RIG.squish - dt * 3.5); const sq = Math.sin(RIG.squish * Math.PI) * .1;
-  charG.scale.set(1 + sq * .5, 1 - sq - RIG.crouch * .08, 1 + sq * .5);
+  charG.scale.set(CS * (1 + sq * .5), CS * (1 - sq - RIG.crouch * .08), CS * (1 + sq * .5));
+  charG.rotation.x = RIG.lean * .3 + RIG.crouch * .1 - .04 + Math.sin(t * 2.2) * .012 * b; // lean the whole toy, not the robe
   if (mode !== 'alley' || INTRO.ph === 'charge' || INTRO.ph === 'blast') charG.position.y = DECK + Math.sin(t * 9) * .004 * b;
   charG.updateMatrixWorld(true);
   const X = charAxis(1, 0, 0), Y = charAxis(0, 1, 0), Z = charAxis(0, 0, 1);
-  rotW(BONES.body, X, RIG.lean * 1.2 + RIG.crouch * .25 + Math.sin(t * 2.2) * .02 * b);
-  let yaw = mode === 'alley' ? (RIG.headYaw ?? 0) : .75, pitch = 0;
-  if (mode !== 'alley' && ptr.seen) { yaw += ptr.cx * .35; pitch += ptr.cy * .12; }
+  let yaw = mode === 'alley' ? (RIG.headYaw ?? 0) : .32, pitch = 0;
+  if (mode !== 'alley' && ptr.seen) { yaw += ptr.cx * .22; pitch += ptr.cy * .08; }
+  yaw = clamp(yaw, -.45, .45);
   yaw = lerp(yaw, 0, HOVER.k);
-  if (RIG.sniff >= 0) yaw = lerp(yaw, -.35, Math.sin(Math.min(1, RIG.sniff / 1.3) * Math.PI));
+  if (RIG.sniff >= 0) yaw = lerp(yaw, -.3, Math.sin(Math.min(1, RIG.sniff / 1.3) * Math.PI));
   RIG.yaw = lerp(RIG.yaw ?? yaw, yaw, damp(dt, 6)); RIG.pitch = lerp(RIG.pitch ?? 0, pitch, damp(dt, 6));
-  rotW(BONES.head, Y, RIG.yaw); rotW(BONES.head, X, -RIG.pitch + Math.sin(t * 2.1) * .03 * b); rotW(BONES.head, Z, -RIG.lean * .5);
+  rotW(BONES.head, Y, RIG.yaw); rotW(BONES.head, X, -RIG.pitch + Math.sin(t * 2.1) * .02 * b); rotW(BONES.head, Z, -RIG.lean * .25);
   headTop.getWorldPosition(_p); const T_ = RIG.tip, vy = dt > 0 ? (_p.y - T_.py) / dt : 0, ay = dt > 0 ? (vy - T_.pv) / dt : 0; T_.py = _p.y; T_.pv = vy;
   for (let i = 0; i < 3; i++) { const h = dt / 3; T_.v += (-110 * T_.x - 5 * T_.v - clamp(ay, -60, 60) * .8) * h; T_.x += T_.v * h; }
   const sw = clamp(T_.x, -.6, .6), flut = mode === 'alley' ? .01 : .05;
   for (const [n, k] of [['tip1', .4], ['tip2', .7], ['tip3', 1]]) { rotW(BONES[n], X, sw * k * .7 + Math.sin(t * 9 + k * 2) * flut * k * b); rotW(BONES[n], Z, Math.sin(t * 6.5 + k) * flut * k * b); }
-  const up = .35 + Math.abs(RIG.lean) * 1.4 + RIG.armsUp + Math.sin(t * 2.3) * .08 * b;
-  rotW(BONES.arm_L, Z, up + RIG.lean * .8); rotW(BONES.arm_R, Z, -(up - RIG.lean * .8));
+  const up = .04 + RIG.armsUp * .25 + Math.sin(t * 2.3) * .025 * b; // the Meshy arms are part of the robe: tiny swings only
+  rotW(BONES.arm_L, Z, up + RIG.lean * .15); rotW(BONES.arm_R, Z, -(up - RIG.lean * .15));
   const pump = RIG.sniff >= 0 ? Math.max(0, Math.sin(RIG.sniff * 18)) : (RIG.sniffIdle || 0);
-  if (BONES.snout) BONES.snout.scale.set(1 + pump * .08, 1 + pump * .25, 1 + pump * .08);
+  if (BONES.snout) BONES.snout.scale.set(1 + pump * .05, 1 + pump * .12, 1 + pump * .05);
 }
 
 /* ================================================================== the ride */
@@ -327,7 +328,7 @@ function stepStreet(dt) {
     if (u >= 1) { RIG.ollie = -1; skater.position.y = 0; boardG.rotation.z = 0; RIG.armsUp = 0; clack(1); RIG.squish = .6; }
   } else skater.position.y = Math.abs(Math.sin(t * 13)) * .006 * b;
   skater.userData.d = dist;
-  if (!GAL.sky) { RIG.trail += dt * (MOBILE ? 10 : 16); buttWorld(); for (; RIG.trail >= 1; RIG.trail--) GAS.emit(_bp.x, _bp.y, _bp.z, { vx: -R01() * 3, vy: .1 + R01() * .3, vz: _bd.z * .8 + (R01() - .5), life: 1 + R01() * .6, s0: .05, s1: .16 + R01() * .14, heat: .6 }); }
+  if (!GAL.sky) { RIG.trail += dt * (MOBILE ? 18 : 30); buttWorld(); for (; RIG.trail >= 1; RIG.trail--) { const k = R01(); GAS.emit(_bp.x + (R01() - .5) * .12, _bp.y + (R01() - .5) * .14, _bp.z + (R01() - .5) * .1, { vx: -R01() * 6, vy: .05 + R01() * .45, vz: _bd.z * (.4 + R01()) + (R01() - .5) * 1.2, life: .7 + R01() * .9, s0: .03, s1: .06 + k * k * .26, heat: .5 + R01() * .4 }); } }
   RIG.nextFart -= dt;
   if (RIG.nextFart < 0 && !GAL.on) { RIG.nextFart = 2.6 + R01() * 3.4; fartBurst(26 + R01() * 16 | 0, .85 + R01() * .45); if (R01() < .5) { RIG.sniff = 0; RIG.sniffed = false; } }
   if (RIG.sniff >= 0) { RIG.sniff += dt; if (RIG.sniff > .45 && !RIG.sniffed) { RIG.sniffed = true; sniffSound(); } if (RIG.sniff > 1.3) RIG.sniff = -1; }
@@ -353,7 +354,7 @@ function stepStreet(dt) {
 /* ================================================================== camera stations */
 const STATIONS = [
   { name: 'Home', pos: V3(5.4, 1.55, 6.8), look: V3(-1.3, .72, 1.4), fov: 30, ap: .35, par: .5 },
-  { name: 'About', pos: V3(1.75, .98, 4.1), look: V3(.05, .74, 1.8), lw: V3(.82, .78, 1.8), pl: V3(.05, .6, 1.8), fov: 34, ap: .7, par: .25 },
+  { name: 'About', pos: V3(2.05, 1.0, 4.6), look: V3(.05, .62, 1.8), lw: V3(.9, .66, 1.8), pl: V3(.05, .52, 1.8), fov: 34, ap: .7, par: .25 },
   { name: 'Memes', pos: V3(-4.6, 1.25, 5.2), look: V3(1.6, .85, 1.7), fov: 42, ap: .15, par: .3 },
 ];
 const ST_ABOUT = 1, ST_MEMES = 2;
@@ -388,7 +389,7 @@ function stepTravel(dt) {
 const GAL = { on: false, t: 0, sky: false, idx: 0, side: 0, yaw: 0, yaw0: 0, slide: 1, ui: 0, hov: 0, fly: 0 };
 const STREET = [road, ground, curbs, ...walks, ...tiles, heli, beam, spot];
 const CLOUDS = createGas(scene, { max: 220, palette: { lit: 0xfff6fb, mid: 0xf6d6ea, shade: 0xc9a6d6, deep: 0x9a7ab8, line: 0x5a4380 } });
-CLOUDS.mesh.visible = CLOUDS.hull.visible = false; CLOUDS.uniforms.uOutline.value = .035; CLOUDS.setFog(SKY_G.hor, 60, 160);
+CLOUDS.mesh.visible = CLOUDS.hull.visible = false; CLOUDS.uniforms.uOutline.value = .035; CLOUDS.setFog(SKY_G.hor, 110, 320); CLOUDS.uniforms.uL.value.set(-.5, .8, .4);
 { seed = 909; for (let i = 0; i < 34; i++) {
   const side = rnd() < .5 ? -1 : 1, z = side * (6 + Math.pow(rnd(), .7) * 50); let y = -14 + rnd() * 24; if (Math.abs(z) < 14 && y > -5 && y < 6) y = rnd() < .5 ? -5 - rnd() * 6 : 6 + rnd() * 5;
   const cx = (rnd() - .5) * 200, w = 2.4 + Math.abs(z) / 60 * 6 + rnd() * 2;
@@ -406,7 +407,7 @@ const galFlash = () => { const f = $('flash'); f.classList.remove('go'); void f.
 function setGalUI(on) { const g = $('gal'); g.classList.toggle('on', on); g.setAttribute('aria-hidden', String(!on)); g.toggleAttribute('inert', !on); }
 function galCaption() { const m = MEMES[GAL.idx], cap = $('galCap'), b = document.createElement('b'); b.textContent = m.name; cap.replaceChildren(`${GAL.idx + 1}/${MEMES.length} · It's `, b, `. ${m.ask}`); }
 function startGallery() { Object.assign(GAL, { on: true, t: 0, sky: false, ui: 0, fly: 0, launched: false }); galCaption(); }
-function setSky(on) { const P = on ? SKY_G : SKY; skyU.uHor.value.copy(P.hor); skyU.uMid.value.copy(P.mid); skyU.uTop.value.copy(P.top); scene.fog.far = on ? 400 : 130; GAS.setFog(P.hor, on ? 60 : 40, on ? 300 : 130); fill.intensity = on ? 1.6 : .6; }
+function setSky(on) { SUN.set(on ? -.55 : .86, on ? .3 : .12, on ? .78 : -.5).normalize(); const P = on ? SKY_G : SKY; skyU.uHor.value.copy(P.hor); skyU.uMid.value.copy(P.mid); skyU.uTop.value.copy(P.top); scene.fog.far = on ? 400 : 130; GAS.setFog(P.hor, on ? 60 : 40, on ? 300 : 130); fill.intensity = on ? 1.6 : .6; }
 function endGallery() {
   $('galImg').classList.remove('on'); GAL.hov = 0; if (!GAL.on) return; const wasSky = GAL.sky; Object.assign(GAL, { on: false, sky: false, ui: 0 });
   if (wasSky) galFlash(); for (const o of [...STREET, ...traffic, ...cops]) o.visible = true; CLOUDS.mesh.visible = CLOUDS.hull.visible = false; setSky(false);
@@ -477,7 +478,7 @@ const INTRO = { on: false, ph: 'off', t: 0, a: null, b: null, bt: 0, dur: 1 };
 function camKey(k, dur) { INTRO.a = { pos: camState.pos.clone(), look: camState.look.clone(), fov: camState.fov }; INTRO.b = AK[k]; INTRO.bt = 0; INTRO.dur = dur; }
 function stepCamKey(dt) { if (!INTRO.b) return; INTRO.bt = Math.min(1, INTRO.bt + dt / INTRO.dur); const k = ease(INTRO.bt); camState.pos.lerpVectors(INTRO.a.pos, INTRO.b.pos, k); camState.look.lerpVectors(INTRO.a.look, INTRO.b.look, k); camState.fov = lerp(INTRO.a.fov, INTRO.b.fov, k); }
 function startIntro() {
-  INTRO.on = true; INTRO.ph = 'pull'; INTRO.t = 0; alley.add(skater); GAS.attach(alley); GAS.air.set(0, 0, 0); GAS.clear(); GAS.setFog(new THREE.Color(0x0b0714), 4, 15);
+  INTRO.on = true; INTRO.ph = 'pull'; INTRO.t = 0; alley.add(skater); GAS.attach(alley); GAS.air.set(0, 0, 0); GAS.clear(); GAS.setFog(new THREE.Color(0x0b0714), 4, 15); GAS.uniforms.uAmb.value.setRGB(.42, .62, .4);
   skater.position.set(0, 0, 0); skater.rotation.set(0, Math.PI / 2, 0); boardG.position.set(-.15, 0, .55); boardG.rotation.set(0, .35, 0);
   charG.position.set(0, 0, -.25); charG.rotation.y = -Math.PI / 2;
   Object.assign(camState, { pos: AK.hole.pos.clone(), look: AK.hole.look.clone(), fov: AK.hole.fov, par: 0, roll: 0, ap: .8 }); camKey('wide', 4.5); sirenFar();
@@ -486,7 +487,7 @@ function rideClick() { if (INTRO.ph !== 'wait') return; $('ride').classList.remo
 function stepIntro(dt) {
   INTRO.t += dt; const t = INTRO.t; stepCamKey(dt);
   const f = (clock * 1.6) % 1; copL[0].intensity = f < .5 && f % .25 < .15 ? 10 : 0; copL[1].intensity = f >= .5 && f % .25 < .15 ? 10 : 0; doorLamp.intensity = 7 * (R01() < .03 ? .2 : 1);
-  if (R01() < dt * 5) GAS.emit(.55 + (R01() - .5) * .5, .05, .9 + (R01() - .5) * .5, { vx: (R01() - .5) * .2, vy: .5 + R01() * .3, vz: (R01() - .5) * .2, life: 2.4, s0: .08, s1: .3, drag: .6, heat: .3, buoy: .5 });
+  if (R01() < dt * 5) GAS.emit(.55 + (R01() - .5) * .5, .05, .9 + (R01() - .5) * .5, { vx: (R01() - .5) * .2, vy: .45 + R01() * .3, vz: (R01() - .5) * .2, life: 2.2, s0: .04, s1: .17, drag: .6, heat: .2, buoy: .45 });
   if (INTRO.ph === 'pull' || INTRO.ph === 'wait') {
     RIG.headYaw = Math.sin(clock * .7) * .55 + (copL[0].intensity > 0 ? -.25 : copL[1].intensity > 0 ? .25 : 0);
     RIG.sniffIdle = Math.max(0, Math.sin(clock * 9)) * (Math.sin(clock * .9) > .3 ? 1 : 0);
@@ -507,7 +508,7 @@ function stepIntro(dt) {
 const GASOUT = { t: -1 };
 function endIntro() {
   if (!INTRO.on) return; INTRO.on = false; INTRO.ph = 'off'; $('ride').classList.remove('on');
-  scene.add(skater); GAS.attach(scene); GAS.clear(); GAS.air.set(-SPEED, 0, 0); GAS.setFog(SKY.hor, 40, 130);
+  scene.add(skater); GAS.attach(scene); GAS.clear(); GAS.air.set(-SPEED, 0, 0); GAS.setFog(SKY.hor, 40, 130); GAS.uniforms.uAmb.value.setRGB(1, 1, 1);
   skater.position.set(0, 0, LANE); skater.rotation.set(0, 0, 0); boardG.position.set(0, 0, 0); boardG.rotation.set(0, 0, 0); charG.position.set(0, DECK, 0); charG.rotation.y = 0;
   RIG.crouch = RIG.armsUp = 0; RIG.headYaw = null; RIG.sniffIdle = 0;
   station = -1; lockUntil = 0; go(0, true); $('ui').classList.add('on'); startChaseAudio();

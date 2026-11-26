@@ -26,13 +26,13 @@ void main(){
   gl_Position=projectionMatrix*viewMatrix*w;}`;
 
 const FRAG = (outline) => `
-uniform vec3 uL,uLit,uMid,uShade,uDeep,uRim,uLine,uHot,uFogC;uniform float uFogN,uFogF,uT;
+uniform vec3 uL,uLit,uMid,uShade,uDeep,uRim,uLine,uHot,uFogC,uAmb;uniform float uFogN,uFogF,uT;
 varying vec3 vN,vW;varying float vAge,vSeed,vHeat;
 ${NOISE}
 void main(){
   float n=fbm3(vW*2.2+vec3(vSeed*9.,uT*.4,0.))*.5+.5;
   float cutT=smoothstep(.45,1.,vAge)*1.15;                    // dissolve from the thin parts as it ages
-  if(n<cutT)discard;
+  if(n<cutT${outline ? '+.05' : ''})discard;
   float dist=length(vW-cameraPosition);float fog=smoothstep(uFogN,uFogF,dist);
   ${outline ? `gl_FragColor=vec4(mix(uLine,uFogC,fog),1.);` : `
   vec3 N=normalize(vN);vec3 V=normalize(cameraPosition-vW);
@@ -43,6 +43,7 @@ void main(){
   c=mix(c,uLit,smoothstep(.74-w,.74+w,ndl));
   float rim=pow(1.-max(dot(N,V),0.),3.);c+=uRim*smoothstep(.45,.55,rim)*.35;
   c=mix(c,uHot,vHeat*.55);                                    // fresh puffs are a hotter lime
+  c*=uAmb;                                                    // scene ambience (dark alley vs dusk street)
   float edge=1.-smoothstep(0.,.05,n-cutT);c=mix(c,uLine,edge*step(.01,cutT)*.8); // dark rim where it dissolves
   gl_FragColor=vec4(mix(c,uFogC,fog),1.);`}
   #include <colorspace_fragment>
@@ -58,7 +59,7 @@ export function createGas(scene, { max = 260, palette = {} } = {}) {
     uT: { value: 0 }, uOutline: { value: .07 }, uL: { value: new THREE.Vector3(.4, .85, .35) },
     uLit: { value: C(palette.lit ?? 0xe9f0c9) }, uMid: { value: C(palette.mid ?? 0xc3cf98) }, uShade: { value: C(palette.shade ?? 0x8f9d6a) },
     uDeep: { value: C(palette.deep ?? 0x5d6b40) }, uRim: { value: C(0xfaffe0) }, uLine: { value: C(palette.line ?? 0x2b3a1c) }, uHot: { value: C(0xc8ff6a) },
-    uFogC: { value: new THREE.Color(0xe7896f) }, uFogN: { value: 40 }, uFogF: { value: 130 },
+    uFogC: { value: new THREE.Color(0xe7896f) }, uFogN: { value: 40 }, uFogF: { value: 130 }, uAmb: { value: new THREE.Color(1, 1, 1) },
   };
   const mat = new THREE.ShaderMaterial({ uniforms, vertexShader: VERT(false), fragmentShader: FRAG(false) });
   const line = new THREE.ShaderMaterial({ uniforms, vertexShader: VERT(true), fragmentShader: FRAG(true), side: THREE.BackSide });
