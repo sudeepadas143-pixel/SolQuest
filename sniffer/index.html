@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SNIFFER</title>
+<meta name="description" content="Sniffer gasses the whole city from a rocket-fast skateboard. The cops are right behind him.">
+<meta property="og:title" content="SNIFFER">
+<meta property="og:description" content="Wanted for 1,337 counts of public gassing. Last seen on a skateboard.">
+<meta property="og:image" content="assets/sniffer-ref.jpg">
+<link rel="icon" href="assets/sniffer-ref.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#eaf7d9;--dim:#eaf7d98c;--gas:#9be35a;--gas2:#5fb83a;--gasdk:#1d3a12;--pink:#ff7fb0;--bg:#0b0812;
+  --f-d:'Bungee',Impact,'Arial Black',sans-serif;--f-p:'Press Start 2P',monospace;--f-v:'VT323',monospace}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:var(--bg);color:var(--ink);overflow:hidden;font-family:var(--f-v);-webkit-font-smoothing:antialiased}
+canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;image-rendering:pixelated}
+
+/* film grain, jumping in steps */
+.grain{position:fixed;inset:-50%;z-index:6;pointer-events:none;opacity:.08;mix-blend-mode:overlay;animation:grain 1s steps(6) infinite}
+@keyframes grain{0%{transform:translate(0,0)}20%{transform:translate(-4%,2%)}40%{transform:translate(3%,-3%)}60%{transform:translate(-2%,-4%)}80%{transform:translate(4%,3%)}}
+
+/* ---------- HUD ---------- */
+.ui{position:fixed;inset:0;z-index:7;pointer-events:none;opacity:0;transition:opacity 1s}
+.ui.on{opacity:1}
+.brand{position:absolute;left:clamp(16px,4vw,56px);top:clamp(14px,3.5vh,40px);font:400 clamp(40px,6.4vw,96px)/1 var(--f-d);letter-spacing:.01em;
+  background:linear-gradient(#efff9a 8%,#9be35a 38%,#4fae2e 64%,#2a6d18 88%);-webkit-background-clip:text;background-clip:text;color:transparent;
+  -webkit-text-stroke:3px #10240a;paint-order:stroke fill;filter:drop-shadow(4px 4px 0 #000) drop-shadow(0 0 18px #9be35a55)}
+.brand small{display:block;margin-top:6px;font:400 10px/1.4 var(--f-p);letter-spacing:.12em;color:#ffd9e8;-webkit-text-stroke:0;background:none;text-shadow:2px 2px 0 #000;filter:none}
+/* wanted level, top centre */
+.wanted{position:absolute;left:50%;top:clamp(14px,3.5vh,40px);transform:translateX(-50%);display:flex;gap:6px;font:400 26px/1 var(--f-p);color:#fff;text-shadow:3px 3px 0 #000}
+.wanted i{font-style:normal;animation:star 1s steps(2) infinite}.wanted i:nth-child(2n){animation-delay:.5s}
+@keyframes star{50%{color:#5a5a5a}}
+/* PS2-style menu buttons, toxic green */
+.btn{--s:4px;font:400 10px/1 var(--f-p);letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;color:#e5ffd0;text-shadow:2px 2px 0 #000;cursor:pointer;border:0;padding:13px 16px 12px;
+  background:repeating-conic-gradient(#ffffff10 0 25%,#0000 0 50%) 0 0/4px 4px,linear-gradient(180deg,#3f7a25,#285616 45%,#173a0c);
+  clip-path:polygon(var(--s) 0,calc(100% - var(--s)) 0,calc(100% - var(--s)) var(--s),100% var(--s),100% calc(100% - var(--s)),calc(100% - var(--s)) calc(100% - var(--s)),calc(100% - var(--s)) 100%,var(--s) 100%,var(--s) calc(100% - var(--s)),0 calc(100% - var(--s)),0 var(--s),var(--s) var(--s));
+  box-shadow:inset 3px 3px 0 #a8ec74,inset -3px -3px 0 #081a03;pointer-events:auto}
+.btn:hover{color:#fff;background:repeating-conic-gradient(#ffffff16 0 25%,#0000 0 50%) 0 0/4px 4px,linear-gradient(180deg,#56a032,#367520 45%,#1f4c10)}
+.btn:active{box-shadow:inset -3px -3px 0 #a8ec74,inset 3px 3px 0 #081a03}
+.btn[aria-pressed=true]{color:#3a0a1c;text-shadow:1px 1px 0 #ffe3ee;background:repeating-conic-gradient(#ffffff1c 0 25%,#0000 0 50%) 0 0/4px 4px,linear-gradient(180deg,#ffd0e2,#ff8fbc 45%,#e2507f);box-shadow:inset 3px 3px 0 #fff0f6,inset -3px -3px 0 #8a1f43}
+.btn[aria-pressed=true]::before{content:"\25B6\FE0E";margin-right:6px}
+.btn:focus-visible{outline:2px solid var(--gas);outline-offset:3px}
+nav{position:absolute;left:clamp(16px,4vw,56px);bottom:clamp(20px,5vh,48px);display:flex;gap:8px}
+.links{position:absolute;right:calc(clamp(16px,4vw,56px) + 52px);top:clamp(14px,3.5vh,40px);display:flex;gap:8px}
+.links .btn{height:40px;display:inline-flex;align-items:center;padding:0 12px}
+.links .btn[aria-disabled]{opacity:.55;cursor:default}
+#snd{position:absolute;right:clamp(16px,4vw,56px);top:clamp(14px,3.5vh,40px);width:44px;height:40px;padding:0;display:grid;place-items:center}
+#snd svg{width:22px;height:22px;filter:drop-shadow(2px 2px 0 #000)}#snd .off{display:none}#snd[aria-pressed=false] .on{display:none}#snd[aria-pressed=false] .off{display:inline}
+#snd[aria-pressed=false]{color:#ff9a9a}
+#snd[aria-pressed]::before{content:none}
+/* scroll hint */
+.hint{position:absolute;right:clamp(16px,4vw,56px);bottom:clamp(24px,5vh,52px);display:flex;align-items:center;gap:10px;font:400 8px/1 var(--f-p);letter-spacing:.08em;text-transform:uppercase;color:#e5ffd0;text-shadow:2px 2px 0 #000;transition:opacity .4s}
+.hint-ico{position:relative;width:20px;height:32px;border:3px solid #e5ffd0;border-radius:10px;box-shadow:2px 2px 0 #000}
+.hint-ico i{position:absolute;left:50%;top:5px;width:4px;height:7px;margin-left:-2px;background:var(--gas);animation:wheel 1.4s steps(6) infinite}
+@keyframes wheel{0%{transform:translateY(0);opacity:1}70%{transform:translateY(10px);opacity:0}100%{opacity:0}}
+.hint .t-touch{display:none}
+@media (pointer:coarse){.hint .t-mouse{display:none}.hint .t-touch{display:inline}}
+.ui.nav-used .hint{opacity:0}
+
+/* ---------- About: a WANTED poster, pinned at an angle ---------- */
+.about{position:absolute;right:clamp(16px,5vw,80px);top:max(50%,330px);width:min(430px,36vw);padding:24px 26px 22px;pointer-events:none;opacity:0;visibility:hidden;
+  transform:translate(40px,-50%) rotate(4deg);transition:opacity .25s steps(4),transform .3s steps(5),visibility 0s .3s;
+  color:#2b1a0e;font:400 22px/1.1 var(--f-v);
+  background:radial-gradient(120% 90% at 30% 20%,#f6e7c2 0,#ead39f 55%,#cfb27a 100%);
+  box-shadow:0 0 0 2px #6b4a22 inset,0 0 0 8px #f0dcac inset,10px 12px 0 #0009;image-rendering:pixelated}
+.about::before{content:"";position:absolute;left:50%;top:-10px;width:18px;height:18px;margin-left:-9px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#ff8fa8,#b3133a 70%);box-shadow:2px 3px 0 #0007}
+.about::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(180deg,#0000 0 3px,#5a3a1408 3px 4px),radial-gradient(60% 40% at 80% 85%,#7a5a2a33,#0000)}
+.about.on{opacity:1;visibility:visible;pointer-events:auto;transform:translate(0,-50%) rotate(2.5deg);animation:sway 4s steps(1) 1.6s infinite;
+  transition:opacity .25s steps(4) 1.2s,transform .3s steps(5) 1.2s,visibility 0s 1.2s}
+@keyframes sway{0%,100%{rotate:0deg}30%{rotate:.4deg}31%{rotate:0deg}70%{rotate:-.3deg}71%{rotate:0deg}}
+.about h2{font:400 clamp(40px,4vw,60px)/1 var(--f-d);text-align:center;letter-spacing:.04em;color:#8e1530;text-shadow:2px 2px 0 #f6e7c2,4px 4px 0 #0003}
+.about .sub{font:400 10px/1.5 var(--f-p);text-align:center;letter-spacing:.14em;margin:4px 0 12px;color:#4a2e12}
+.about .mug{display:block;width:62%;margin:0 auto 12px;aspect-ratio:1;object-fit:contain;background:#fff;border:3px solid #3b2410;filter:sepia(.25) contrast(1.05);image-rendering:auto}
+.about p{margin:0 0 12px;text-align:center}
+.about dl{margin:0;padding:8px 10px;border-top:2px dashed #6b4a22;border-bottom:2px dashed #6b4a22}
+.about dl div{display:flex;gap:10px;align-items:baseline;padding:2px 0}
+.about dt{font:400 10px/1.8 var(--f-p);letter-spacing:.06em;text-transform:uppercase;color:#6b1023;flex:none}
+.about dd{margin:0 0 0 auto;text-align:right}
+.about .reward{margin-top:10px;text-align:center;font:400 26px/1 var(--f-d);color:#2f6d18}
+#ca code{font:inherit;font-size:17px;word-break:break-all;user-select:all}
+.ca-copy{font:400 8px/1 var(--f-p);border:0;padding:6px 7px;margin-left:6px;cursor:pointer;background:#2f6d18;color:#eaffd8}
+@media (max-width:820px){.about{left:16px;right:16px;width:auto;top:auto;bottom:calc(clamp(20px,5vh,48px) + 56px);max-height:52vh;overflow:auto;transform:translateY(28px) rotate(1deg)}.about.on{transform:rotate(1deg)}.about .mug{width:34%}}
+
+/* ---------- meme gallery overlay (the 3D card is in the scene; these are the crisp image + arrows) ---------- */
+.gal{position:absolute;inset:0;pointer-events:none;opacity:0;visibility:hidden;transition:opacity .25s steps(3),visibility 0s .25s}
+.gal.on{opacity:1;visibility:visible;transition:opacity .25s steps(3)}
+.gal-img{position:absolute;object-fit:cover;pointer-events:none;opacity:0;transition:opacity .15s;box-shadow:6px 6px 0 #000}.gal-img.on{opacity:1}
+.gal-arr{position:absolute;width:56px;height:56px;transform:translate(-50%,-50%);font:400 18px/1 var(--f-p);padding:0}
+.gal-cap{position:absolute;left:50%;bottom:clamp(76px,12vh,120px);transform:translateX(-50%);font:400 12px/1.5 var(--f-p);text-align:center;color:#fff;text-shadow:2px 2px 0 #000;max-width:90vw}
+.gal-cap b{color:var(--gas);font-weight:400}
+
+/* ---------- loading gate: a gas-meter CRT ---------- */
+.gate{position:fixed;inset:0;z-index:9;display:grid;place-items:center;background:radial-gradient(80% 70% at 50% 45%,#1c2a14 0,#0c1209 60%,#050704 100%);transition:opacity .6s}
+.gate.off{opacity:0;pointer-events:none}
+.gate::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(180deg,#0000 0 2px,#0000003a 2px 3px),radial-gradient(120% 100% at 50% 50%,#0000 55%,#000c 100%)}
+.gate-in{position:relative;display:grid;justify-items:center;gap:22px;z-index:1}
+#gword{display:flex;font:400 clamp(64px,13vw,210px)/1 var(--f-d);letter-spacing:.02em;color:#b8ff6a;
+  text-shadow:0 0 .05em #f2ffd0,0 0 .2em #9be35aaa,0 0 .6em #5fb83a66;animation:flick 3.7s steps(1) infinite}
+#gword span{display:inline-block;animation:bob 1.2s ease-in-out infinite;animation-delay:calc(var(--i) * -.12s)}
+@keyframes bob{50%{transform:translateY(-.06em)}}
+@keyframes flick{0%,100%{opacity:1}41%{opacity:.82}42%{opacity:1}77%{opacity:.9}78%{opacity:1}}
+.meter{width:min(420px,70vw);height:18px;padding:3px;background:#0a1407;box-shadow:0 0 0 2px #5fb83a,0 0 0 5px #0a1407,0 0 18px #9be35a44}
+.meter i{display:block;height:100%;width:0;background:repeating-linear-gradient(90deg,#9be35a 0 10px,#7fcf45 10px 14px);box-shadow:0 0 12px #9be35a;transition:width .3s steps(6)}
+#prog{font:400 11px/1 var(--f-p);letter-spacing:.3em;color:#cfeeb6;text-transform:uppercase}
+#enter{background:none;border:0;padding:0;cursor:wait;color:inherit}#enter:not(:disabled){cursor:pointer}
+#enter:not(:disabled):hover #gword{filter:brightness(1.2)}#enter:focus-visible{outline:3px solid var(--gas);outline-offset:10px}
+.bubbles{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.bubbles b{position:absolute;bottom:-40px;width:var(--s);height:var(--s);border-radius:50%;background:radial-gradient(circle at 35% 35%,#d8ff9c,#6fc23e 60%,#3a7a1e);opacity:.35;filter:blur(1px);animation:rise var(--d) linear infinite;animation-delay:var(--dl);left:var(--x)}
+@keyframes rise{to{transform:translateY(-115vh) translateX(var(--w))}}
+
+/* intro "ride" button + green-out */
+#ride{position:fixed;left:50%;bottom:clamp(40px,10vh,96px);transform:translateX(-50%);z-index:8;font-size:12px;padding:16px 28px 15px;opacity:0;pointer-events:none;transition:opacity .4s}
+#ride.on{opacity:1;pointer-events:auto}
+.flash{position:fixed;inset:0;z-index:6;pointer-events:none;background:#efffd8;opacity:0}
+.flash.go{animation:flash .5s steps(5)}
+@keyframes flash{0%{opacity:0}20%{opacity:1}100%{opacity:0}}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@media (max-width:640px){nav{left:50%;transform:translateX(-50%)}.hint{right:auto;left:50%;transform:translateX(-50%);bottom:calc(clamp(20px,5vh,48px) + 56px)}.wanted{top:auto;bottom:calc(clamp(20px,5vh,48px) + 110px);font-size:18px}.links{top:calc(clamp(14px,3.5vh,40px) + 48px);right:16px}}
+@media (prefers-reduced-motion:reduce){.grain,.wanted i,#gword,#gword span,.bubbles b,.hint-ico i{animation:none}.about.on{animation:none}}
+</style>
+</head>
+<body>
+<canvas id="gl" aria-label="Sniffer skating through the city, chased by police" role="img"></canvas>
+<div class="grain" id="grain" aria-hidden="true"></div>
+<div class="flash" id="flash" aria-hidden="true"></div>
+
+<div class="ui" id="ui">
+  <h1 class="brand">SNIFFER<small>smell ya later, officer</small></h1>
+  <div class="wanted" aria-label="Wanted level: five stars"><i>★</i><i>★</i><i>★</i><i>★</i><i>★</i></div>
+  <div class="links" id="links" role="group" aria-label="Project links"></div>
+  <button class="btn" id="snd" type="button" aria-pressed="true" aria-label="Sound on">
+    <svg class="on" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>
+    <svg class="off" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm18.6 6.2L19.4 13l2.2-2.2-1.4-1.4L18 11.6l-2.2-2.2-1.4 1.4 2.2 2.2-2.2 2.2 1.4 1.4 2.2-2.2 2.2 2.2z"/></svg>
+  </button>
+
+  <section class="about" id="about" aria-labelledby="about-t" aria-hidden="true" inert>
+    <h2 id="about-t">WANTED</h2>
+    <div class="sub">DEAD OR SMELLY</div>
+    <img class="mug" src="assets/sniffer-ref.jpg" alt="Sniffer: a little green hooded guy in a gas mask">
+    <p>SNIFFER. 1,337 counts of public gassing. Last seen on a skateboard doing 80 km/h, leaving a green cloud over every block.</p>
+    <dl>
+      <div><dt>Ticker</dt><dd id="tick">$SNIFF</dd></div>
+      <div><dt>CA</dt><dd id="ca">Coming soon</dd></div>
+      <div><dt>Threat</dt><dd>★★★★★</dd></div>
+      <div><dt>Approach</dt><dd>hold your breath</dd></div>
+    </dl>
+    <div class="reward">REWARD: GAS MONEY</div>
+  </section>
+
+  <div class="gal" id="gal" aria-hidden="true" inert>
+    <img class="gal-img" id="galImg" alt="">
+    <button class="btn gal-arr" id="galPrev" type="button" aria-label="Previous meme">◀</button>
+    <button class="btn gal-arr" id="galNext" type="button" aria-label="Next meme">▶</button>
+    <div class="gal-cap" id="galCap" aria-live="polite"></div>
+  </div>
+
+  <div class="hint" aria-hidden="true"><span class="hint-ico"><i></i></span><span class="t-mouse">scroll</span><span class="t-touch">swipe</span></div>
+  <nav aria-label="Sections">
+    <button class="btn" type="button" data-s="0" aria-pressed="true">Home</button>
+    <button class="btn" type="button" data-s="1" aria-pressed="false">About</button>
+    <button class="btn" type="button" data-s="2" aria-pressed="false">Memes</button>
+  </nav>
+  <div class="sr" id="live" aria-live="polite"></div>
+</div>
+
+<button class="btn" id="ride" type="button">Press to ride</button>
+
+<div class="gate" id="gate">
+  <div class="bubbles" id="bubbles" aria-hidden="true"></div>
+  <div class="gate-in">
+    <button id="enter" type="button" disabled aria-label="Loading"><span id="gword"></span></button>
+    <div class="meter" aria-hidden="true"><i id="bar"></i></div>
+    <p id="prog">loading 0%</p>
+  </div>
+</div>
+
+<script type="importmap">{"imports":{"three":"./vendor/three.module.min.js"}}</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
