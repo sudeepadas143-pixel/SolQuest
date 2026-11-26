@@ -292,7 +292,7 @@ function stepCling() { // follow his butt every frame, breathing gently
 function fartBurst(n = 30, power = 1) { buttWorld(); GAS.burst(_bp, _bd, n, power); RIG.squish = 1; fartSound(power, .35 + power * .35 + R01() * .3); }
 
 /* ================================================================== the rider: procedural pose on the skeleton */
-const RIDE_YAW = .6; // riding: his body turns toward where he's going (+X), the head does the rest
+const RIDE_YAW = 0; // riding: the body stays square on the board; only the head turns to the road // riding: his body turns toward where he's going (+X), the head does the rest
 const ABT = { t: -1, dir: 1, y0: 0, y1: 0, arm: 'L', YAW: 1.0 }; // About trick: pop → 360 shove-it + body varial to face camera → land → wave
 const RIG = { squish: 0, lean: 0, crouch: 0, armsUp: 0, sniff: -1, headYaw: null, ollie: -1, nextOllie: 5, nextFart: 2.5, lastZ: LANE, lastVz: 0, trail: 0, tip: { x: 0, v: 0, py: 0, pv: 0 } };
 const HOVER = { k: 0, was: false };
@@ -316,7 +316,7 @@ function poseRider(dt, mode) {
   charG.position.y = (mode !== 'alley' || INTRO.ph === 'land') ? DECK + Math.sin(t * 9) * .004 * b : 0; // on the ledge he stands on concrete, not the deck
   charG.updateMatrixWorld(true);
   const X = charAxis(1, 0, 0), Y = charAxis(0, 1, 0), Z = charAxis(0, 0, 1);
-  let yaw = mode === 'alley' ? (RIG.headYaw ?? 0) : station === ST_ABOUT ? -.1 : .45, pitch = mode === 'street' && station !== ST_ABOUT ? -.08 : 0; // riding: eyes on the road ahead
+  let yaw = mode === 'alley' ? (RIG.headYaw ?? 0) : station === ST_ABOUT ? -.1 : .45, pitch = 0; // riding: the head turns to look down the road (the mask is fully head-weighted, so it turns cleanly)
   if (mode !== 'alley' && ptr.seen) { yaw += ptr.cx * .22; pitch += ptr.cy * .08; }
   yaw = clamp(yaw, -.45, .45);
   yaw = lerp(yaw, 0, HOVER.k);
@@ -395,7 +395,7 @@ function aboutTrick(dir) { ABT.t = 0; ABT.dir = dir; ABT.y0 = RIG.bodyYaw || 0; 
 /* ================================================================== camera stations */
 const STATIONS = [
   { name: 'Home', pos: V3(5.4, 1.55, 6.8), look: V3(-1.3, .72, 1.4), fov: 30, ap: .35, par: .5 },
-  { name: 'About', pos: V3(2.05, 1.0, 4.6), look: V3(.05, .62, 1.8), lw: V3(.9, .66, 1.8), pl: V3(.05, .52, 1.8), fov: 34, ap: .7, par: .25 },
+  { name: 'About', pos: V3(2.05, 1.0, 4.6), look: V3(.05, .62, 1.8), lw: V3(.9, .66, 1.8), pl: V3(.05, .05, 1.8), fov: 34, ap: .7, par: .25 },
   { name: 'Memes', pos: V3(-4.6, 1.25, 5.2), look: V3(1.6, .85, 1.7), fov: 42, ap: .15, par: .3 },
 ];
 const ST_ABOUT = 1, ST_MEMES = 2;
@@ -700,9 +700,9 @@ function stepIntro(dt) {
   if (INTRO.ph === 'land') { // impact squash → recover → first proper fart
     const k = clamp(t / .5, 0, 1); RIG.crouch = (1 - ease(k)) * 1; boardG.rotation.z = Math.sin(k * Math.PI) * -.08;
     camState.pos.lerp(_fp.copy(LAND).addScaledVector(RGT, 4.4).addScaledVector(FWD, -2.8).setY(1.3), damp(dt, 4)); camState.look.lerp(_fl.set(LAND.x, .6, LAND.z), damp(dt, 6));
-    if (t > .55 && !INTRO.farted) { INTRO.farted = true; fartBurst(70, 2); sirenFar(); }
-    if (t > .8) post.comp.uniforms.uGas.value = clamp((t - .8) / .7, 0, 1);
-    if (t > 1.5) endIntro();
+    if (t > .3 && !INTRO.farted) { INTRO.farted = true; fartBurst(70, 2); sirenFar(); }
+    if (t > .55) post.comp.uniforms.uGas.value = clamp((t - .55) / .3, 0, 1);
+    if (t > .85) endIntro();
   }
 }
 const GASOUT = { t: -1 };
@@ -810,7 +810,7 @@ function frame(now) { raf = requestAnimationFrame(frame); let dt = Math.min(.05,
 function tick(dt) {
   clock += dt; sky.material.uniforms.uT.value = clock;
   const cu = post.comp.uniforms; if (cu.uGlitch.value > 0) cu.uGlitch.value = Math.max(0, cu.uGlitch.value - dt * .8); cu.uT.value = clock;
-  if (GASOUT.t >= 0) { GASOUT.t += dt; cu.uGas.value = Math.max(0, 1 - GASOUT.t / 1.4); if (GASOUT.t > 1.4) GASOUT.t = -1; }
+  if (GASOUT.t >= 0) { GASOUT.t += dt; cu.uGas.value = Math.max(0, 1 - GASOUT.t / .5); if (GASOUT.t > .5) GASOUT.t = -1; }
   cu.uZoom.value = lerp(cu.uZoom.value, GAL.sky ? .8 : GAL.on && GAL.t > .7 ? .9 : 0, damp(dt, 3));
   if (INTRO.on) { stepIntro(dt); poseRider(dt, 'alley'); } else { stepTravel(dt); stepStreet(dt); if (!GAL.sky) stepSmog(dt); stepGallery(dt); poseRider(dt, GAL.sky ? 'sky' : 'street'); stepAudio(dt); }
   GAS.step(dt, clock); stepCling();
