@@ -6,7 +6,7 @@
 //     slight desaturation + contrast, cool shadows, vignette, plus effect modes (CRT glitch, speed zoom, gas wipe).
 import * as THREE from 'three';
 
-export function createPost(R, { mobile = false, lines = 1080, maxPixels = 2.4e6 } = {}) {
+export function createPost(R, { mobile = false, lines = 720, maxPixels = 2.4e6 } = {}) {
   const opt = { type: THREE.HalfFloatType, colorSpace: THREE.LinearSRGBColorSpace };
   const rt = new THREE.WebGLRenderTarget(4, 4, opt);
   rt.depthTexture = new THREE.DepthTexture(4, 4); rt.depthTexture.type = THREE.UnsignedIntType;
@@ -74,6 +74,13 @@ export function createPost(R, { mobile = false, lines = 1080, maxPixels = 2.4e6 
         c+=vec3(.035,.012,-.03)*smoothstep(.5,1.,l);                                               // warm golden highlights
         {vec2 vq=vUv-.5;c*=1.-dot(vq,vq)*.55;}                                                     // lens vignette
         c=clamp(c,0.,1.);
+        { // modern-retro finish: 4x4 ordered dither into gentle colour banding + faint scanlines on the internal pixel grid
+          vec2 px=floor(vUv/uPx);int bx=int(mod(px.x,4.)),by=int(mod(px.y,4.));
+          float b=0.;int k=bx+by*4;
+          if(k==0)b=0.;else if(k==1)b=8.;else if(k==2)b=2.;else if(k==3)b=10.;else if(k==4)b=12.;else if(k==5)b=4.;else if(k==6)b=14.;else if(k==7)b=6.;
+          else if(k==8)b=3.;else if(k==9)b=11.;else if(k==10)b=1.;else if(k==11)b=9.;else if(k==12)b=15.;else if(k==13)b=7.;else if(k==14)b=13.;else b=5.;
+          float lv=40.;c=floor(c*lv+(b/16.))/lv;
+          c*=1.-.07*step(.5,fract(px.y*.5));}
         if(uGas>.001){ // toon gas wipe: posterised fbm with an outline at each band edge
           vec2 q=vUv*vec2(1.6,1.)*3.;float n=fbm(q+vec2(uT*.35,-uT*.22))*.7+fbm(q*2.3-uT*.5)*.3;float v=n+uGas*1.25-.75;
           float b1=step(.0,v),b2=step(.18,v),b3=step(.34,v);vec3 gc=mix(uGasA,uGasB,b2);gc=mix(gc,uGasC,b3);
@@ -88,7 +95,7 @@ export function createPost(R, { mobile = false, lines = 1080, maxPixels = 2.4e6 
 
   let pr = 1, lastW = 1, lastH = 1;
   // quality tiers: internal resolution, DoF taps (or off), bloom passes
-  const TIERS = { high: { lines, dof: 'hi', blur: 4 }, med: { lines: Math.round(lines * .78), dof: 'lo', blur: 2 }, low: { lines: Math.round(lines * .58), dof: null, blur: 2 } };
+  const TIERS = { high: { lines, dof: 'hi', blur: 4 }, med: { lines: Math.round(lines * .88), dof: 'lo', blur: 2 }, low: { lines: Math.round(lines * .74), dof: null, blur: 2 } };
   let tier = TIERS.high;
   function setQuality(name) { tier = TIERS[name] || TIERS.high; if (tier.dof) dof = DOF[tier.dof]; for (const m of Object.values(DOF)) m.uniforms.uPx.value.copy(DOF.hi.uniforms.uPx.value); resize(lastW, lastH); }
   function resize(w, h) {
