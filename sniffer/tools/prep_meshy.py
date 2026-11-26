@@ -163,13 +163,22 @@ bone('tip1', TIP[0], TIP[1], 'head'); bone('tip2', TIP[1], TIP[2], 'tip1'); bone
 sh = .38 * H
 bone('arm_L', (arm_x * .62, 0, sh), (arm_x, -.02, .2 * H), 'body'); bone('arm_R', (-arm_x * .62, 0, sh), (-arm_x, -.02, .2 * H), 'body')
 bone('foot_L', (.12, 0, .05), (.12, -.15, .05), 'root'); bone('foot_R', (-.12, 0, .05), (-.12, -.15, .05), 'root')
-sn = Vector(snoutv.tolist()); bone('snout', (0, sn.y + .13, sn.z), (0, sn.y, sn.z), 'head')
+sn = Vector(snoutv.tolist())
+ring = co[co[:, 1] < sn.y + .05]; scx = float(ring[:, 0].min() + ring[:, 0].max()) / 2; scz = float(ring[:, 2].min() + ring[:, 2].max()) / 2
+srad = float(max(ring[:, 0].max() - ring[:, 0].min(), ring[:, 2].max() - ring[:, 2].min())) / 2  # the tube: argmin-y is only its top rim
+print('snout tube centre', round(scx, 3), round(scz, 3), 'r', round(srad, 3))
+bone('snout', (scx, sn.y + .13, scz), (scx, sn.y, scz), 'head')
 bpy.ops.object.mode_set(mode='OBJECT')
 
 def sstep(a, b, x): t = np.clip((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t)
 z, y, x = co[:, 2], co[:, 1], co[:, 0]
 W = {}
 head = sstep(neck - .04, neck + .05, z)
+# the whole gas mask (snout tube + filter ring) rides on the head: otherwise its lower rim sits under the neck line, keeps
+# partial body weight and shears into a flap whenever the head turns
+mask = sstep(srad + .14, srad + .06, np.abs(x - scx)) * sstep(sn.y + .34, sn.y + .22, y) * sstep(srad + .14, srad + .06, np.abs(z - scz))
+print('mask verts', int((mask > .5).sum()), 'of which under-weighted', int(((mask > .5) & (head < .99)).sum()))
+head = np.maximum(head, mask)
 W['foot_L'] = (1 - sstep(.05 * H, .11 * H, z)) * (x > 0); W['foot_R'] = (1 - sstep(.05 * H, .11 * H, z)) * (x <= 0)
 armw = sstep(arm_x * .62, arm_x * .8, xs) * sstep(.14 * H, .2 * H, z) * (1 - sstep(.46 * H, .52 * H, z))
 W['arm_L'] = armw * (x > 0); W['arm_R'] = armw * (x <= 0)
@@ -181,7 +190,7 @@ for i in range(3):
 in_tip = sstep(TIP[0].z - .05, TIP[0].z + .04, z) * (y > TIP[0].y - .08) * sstep(.2, .12, best_d)
 for i, nm in enumerate(['tip1', 'tip2', 'tip3']):
     W[nm] = in_tip * np.clip(1 - np.abs(best_t - (i + .5)) / 1.0, 0, 1)
-snout = (y < sn.y + .14) * sstep(.13, .09, np.abs(z - sn.z)) * sstep(.12, .08, np.abs(x))
+snout = sstep(sn.y + .24, sn.y + .1, y) * sstep(srad + .1, srad + .03, np.abs(z - scz)) * sstep(srad + .1, srad + .03, np.abs(x - scx)) # the whole tube, smooth falloff
 W['snout'] = snout * head
 taken = sum(W.values())
 W['head'] = np.clip(head - taken, 0, 1); W['body'] = np.clip(1 - head - W['foot_L'] - W['foot_R'] - W['arm_L'] - W['arm_R'], 0, 1) * (1 - head)

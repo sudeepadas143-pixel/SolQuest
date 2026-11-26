@@ -281,6 +281,7 @@ function stepCling() { // follow his butt every frame, breathing gently
 function fartBurst(n = 30, power = 1) { buttWorld(); GAS.burst(_bp, _bd, n, power); RIG.squish = 1; fartSound(power, .35 + power * .35 + R01() * .3); }
 
 /* ================================================================== the rider: procedural pose on the skeleton */
+const ABT = { t: -1, dir: 1, y0: 0, y1: 0, arm: 'L', YAW: 1.0 }; // About trick: pop → 360 shove-it + body varial to face camera → land → wave
 const RIG = { squish: 0, lean: 0, crouch: 0, armsUp: 0, sniff: -1, headYaw: null, ollie: -1, nextOllie: 5, nextFart: 2.5, lastZ: LANE, lastVz: 0, trail: 0, tip: { x: 0, v: 0, py: 0, pv: 0 } };
 const HOVER = { k: 0, was: false };
 const ptr = { x: 0, y: 0, cx: 0, cy: 0, seen: false };
@@ -299,10 +300,11 @@ function poseRider(dt, mode) {
   const st = clamp(RIG.st, -.45, .5), w = 1 / Math.sqrt(1 + st);
   charG.scale.set(CS * (1 + sq * .5) * w, CS * (1 + st - sq - RIG.crouch * .08), CS * (1 + sq * .5) * w);
   charG.rotation.x = RIG.lean * .3 + RIG.crouch * .1 - .04 + Math.sin(t * 2.2) * .012 * b; // lean the whole toy, not the robe
+  charG.rotation.y = RIG.bodyYaw || 0; // About: body varial to face the camera
   charG.position.y = (mode !== 'alley' || INTRO.ph === 'land') ? DECK + Math.sin(t * 9) * .004 * b : 0; // on the ledge he stands on concrete, not the deck
   charG.updateMatrixWorld(true);
   const X = charAxis(1, 0, 0), Y = charAxis(0, 1, 0), Z = charAxis(0, 0, 1);
-  let yaw = mode === 'alley' ? (RIG.headYaw ?? 0) : .32, pitch = 0;
+  let yaw = mode === 'alley' ? (RIG.headYaw ?? 0) : lerp(.32, -.1, clamp(RIG.bodyYaw || 0, 0, 1)), pitch = 0;
   if (mode !== 'alley' && ptr.seen) { yaw += ptr.cx * .22; pitch += ptr.cy * .08; }
   yaw = clamp(yaw, -.45, .45);
   yaw = lerp(yaw, 0, HOVER.k);
@@ -314,9 +316,10 @@ function poseRider(dt, mode) {
   const sw = clamp(T_.x, -.6, .6), flut = mode === 'alley' ? (INTRO.ph === 'fall' ? .14 : .08) : .05; // rooftop wind / free-fall flutter
   for (const [n, k] of [['tip1', .4], ['tip2', .7], ['tip3', 1]]) { rotW(BONES[n], X, sw * k * .7 + Math.sin(t * 9 + k * 2) * flut * k * b); rotW(BONES[n], Z, Math.sin(t * 6.5 + k) * flut * k * b); }
   const up = .04 + RIG.armsUp * .8 + Math.sin(t * 2.3) * .025 * b, fl = RIG.flail || 0; // sleeves are robe-weighted: clean up to ~45°
-  rotW(BONES.arm_L, Z, up + fl + RIG.lean * .15); rotW(BONES.arm_R, Z, -(up - fl - RIG.lean * .15));
+  const wv = RIG.wave || 0, wa = wv * (.95 + Math.sin(t * 15) * .28); // hello wave on the camera-side arm
+  rotW(BONES.arm_L, Z, up + fl + RIG.lean * .15 + (ABT.arm === 'L' ? wa : 0)); rotW(BONES.arm_R, Z, -(up - fl - RIG.lean * .15) - (ABT.arm === 'R' ? wa : 0));
   const pump = RIG.sniff >= 0 ? Math.max(0, Math.sin(RIG.sniff * 18)) : (RIG.sniffIdle || 0);
-  if (BONES.snout) BONES.snout.scale.set(1 + pump * .05, 1 + pump * .12, 1 + pump * .05);
+  if (BONES.snout) BONES.snout.scale.set(1 + pump * .07, 1 + pump * .05, 1 + pump * .07); // filter breathes: an even swell of the whole tube
 }
 
 /* ================================================================== the ride */
@@ -335,6 +338,7 @@ function stepStreet(dt) {
     skater.position.y = .55 * 4 * u * (1 - u); boardG.rotation.z = u < .3 ? Math.sin(u / .3 * Math.PI) * .4 : 0; RIG.armsUp = Math.sin(u * Math.PI) * .5; RIG.crouch = u < .15 ? 1 - u / .15 : 0;
     if (u >= 1) { RIG.ollie = -1; skater.position.y = 0; boardG.rotation.z = 0; RIG.armsUp = 0; clack(1); RIG.squish = .6; RIG.stv = -5; }
   } else skater.position.y = Math.abs(Math.sin(t * 13)) * .006 * b;
+  stepAboutTrick(dt);
   skater.userData.d = dist;
   if (!GAL.sky) { RIG.trail += dt * (MOBILE ? 18 : 30); buttWorld(); for (; RIG.trail >= 1; RIG.trail--) { const k = R01(); GAS.emit(_bp.x + (R01() - .5) * .12, _bp.y + (R01() - .5) * .14, _bp.z + (R01() - .5) * .1, { vx: -R01() * 6, vy: .05 + R01() * .45, vz: _bd.z * (.4 + R01()) + (R01() - .5) * 1.2, life: .7 + R01() * .9, s0: .03, s1: .06 + k * k * .26, heat: .5 + R01() * .4 }); } }
   RIG.nextFart -= dt;
@@ -359,6 +363,23 @@ function stepStreet(dt) {
   sunL.target.position.set(skater.position.x, 0, skater.position.z); sunL.position.copy(sunL.target.position).add(_p.set(26, 20, -14));
 }
 
+function stepAboutTrick(dt) {
+  if (ABT.t < 0) return;
+  const t0 = ABT.t; ABT.t += dt; const t = ABT.t; RIG.nextOllie = Math.max(RIG.nextOllie, 3); RIG.ollie = -1;
+  if (t < .14) { RIG.crouch = t / .14; return; } // load up
+  if (t0 < .14) { RIG.stv = 6; clack(.8); whoosh(.5); }
+  if (t < .76) { // airborne: the board spins a full 360 under him while his body turns to face us
+    const u = (t - .14) / .62; skater.position.y = .75 * 4 * u * (1 - u); RIG.crouch = Math.max(0, 1 - u * 5);
+    boardG.rotation.y = Math.PI * 2 * ease(u) * ABT.dir; RIG.bodyYaw = lerp(ABT.y0, ABT.y1, ease(Math.min(1, u * 1.15)));
+    RIG.armsUp = Math.sin(u * Math.PI) * .7; RIG.flail = Math.sin(u * Math.PI * 3) * .15; return;
+  }
+  if (t0 < .76) { skater.position.y = 0; boardG.rotation.y = 0; RIG.bodyYaw = ABT.y1; RIG.armsUp = RIG.flail = 0; RIG.stv = -7; RIG.squish = .7; clack(1);
+    if (ABT.dir > 0) { RIG.sniff = 0; RIG.sniffed = false; } }
+  if (ABT.dir > 0) RIG.wave = clamp((t - .95) / .2, 0, 1) * clamp((2.9 - t) / .3, 0, 1); // hello!
+  if (t > 3) { ABT.t = -1; RIG.wave = 0; }
+}
+function aboutTrick(dir) { ABT.t = 0; ABT.dir = dir; ABT.y0 = RIG.bodyYaw || 0; ABT.y1 = dir > 0 ? ABT.YAW : 0; RIG.wave = 0; }
+
 /* ================================================================== camera stations */
 const STATIONS = [
   { name: 'Home', pos: V3(5.4, 1.55, 6.8), look: V3(-1.3, .72, 1.4), fov: 30, ap: .35, par: .5 },
@@ -373,7 +394,8 @@ let travel = null, lockUntil = 0;
 function go(i, instant = REDUCED) {
   i = clamp(i, 0, STATIONS.length - 1); if (i === station && !instant) return;
   const now = performance.now(); if (now < lockUntil) return; lockUntil = now + 900;
-  station = i; const S = STATIONS[i];
+  const prev = station; station = i; const S = STATIONS[i];
+  if (i === ST_ABOUT) { if (!instant && !REDUCED) { aboutTrick(1); setTimeout(() => { if (station === ST_ABOUT) { clack(1.5); whoosh(.3); post.comp.uniforms.uGlitch.value = Math.max(post.comp.uniforms.uGlitch.value, .3); } }, 1400); } else RIG.bodyYaw = ABT.YAW; } else if (prev === ST_ABOUT && (RIG.bodyYaw || ABT.t >= 0)) { if (instant || REDUCED) { ABT.t = -1; RIG.bodyYaw = 0; RIG.wave = 0; boardG.rotation.y = 0; } else aboutTrick(-1); }
   document.querySelectorAll('nav .btn').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.s === i))); $('live').textContent = S.name;
   const ab = $('about'), on = i === ST_ABOUT; ab.classList.toggle('on', on); ab.setAttribute('aria-hidden', String(!on)); ab.toggleAttribute('inert', !on);
   if (GAL.on && i !== ST_MEMES) { endGallery(); instant = true; }
@@ -461,8 +483,8 @@ function stepGallery(dt) {
 /* ================================================================== INTRO: the rooftop. Sniffer on a skyscraper ledge above a canyon of towers →
    JUMP → anticipation, leap, dive through the city, flip, land on his glowing board in the street, gas → chase */
 const roof = new THREE.Scene();
-const HAZE = new THREE.Color(0xdcdad4);
-roof.background = HAZE.clone(); roof.fog = new THREE.Fog(HAZE.clone(), 150, 620); roof.environment = scene.environment; roof.environmentIntensity = .35;
+const HAZE = new THREE.Color(0xc9d6e6); // soft blue sky haze (keeps the far towers in the painting's pale blue)
+roof.background = HAZE.clone(); roof.fog = new THREE.Fog(HAZE.clone(), 220, 820); roof.environment = scene.environment; roof.environmentIntensity = .35;
 const ROOF_Y = 140; // top of Sniffer's building
 // arched-window facade (the painting's warm towers) — white base, tinted per building by vertex colour
 const archTex = canvasTex(16, 32, (x, w, h) => {
@@ -470,12 +492,20 @@ const archTex = canvasTex(16, 32, (x, w, h) => {
   for (let f = 0; f < 4; f++) for (let c = 0; c < 4; c++) { const X = c * 4 + 1, Y = f * 8 + 2; x.fillStyle = '#2a1c16'; x.fillRect(X, Y + 1, 2, 4); x.fillRect(X + .5, Y, 1, 1); }
   x.fillStyle = '#e8ddd0'; for (let f = 0; f < 4; f++) x.fillRect(0, f * 8 + 7, w, 1);
 }); archTex.wrapS = archTex.wrapT = THREE.RepeatWrapping;
+const litTex = canvasTex(16, 32, (x, w, h) => { // same window grid; a few panes lit warm (emissive)
+  x.fillStyle = '#000'; x.fillRect(0, 0, w, h); const L = ['#ffd27a', '#ffe9b0', '#ffb36a', '#bfe8ff'];
+  for (let f = 0; f < 4; f++) for (let c = 0; c < 4; c++) if ((f * 7 + c * 3) % 5 === 0) { const X = c * 4 + 1, Y = f * 8 + 2; x.fillStyle = L[(f + c) % 4]; x.fillRect(X, Y + 1, 2, 4); x.fillRect(X + .5, Y, 1, 1); }
+}); litTex.wrapS = litTex.wrapT = THREE.RepeatWrapping;
 const RMAT = {
-  bld: new THREE.MeshStandardMaterial({ vertexColors: true, map: archTex, roughness: .92 }),
+  bld: new THREE.MeshStandardMaterial({ vertexColors: true, map: archTex, emissiveMap: litTex, emissive: 0xffffff, emissiveIntensity: .45, roughness: .92 }),
+  neon: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }),
   flat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .9, flatShading: true }),
   ink: new THREE.LineBasicMaterial({ color: 0x141210, transparent: true, opacity: .75 }),
 };
-const WARM = [0xd9a35a, 0xc99a6a, 0xe0b470, 0xb88a5a], DARK = [0x6a3a3e, 0x5a3a4a, 0x7a4a42, 0x4a3a58, 0x8a5a4a], GREY = [0xe6e6e2, 0xcfcfcb, 0xb9b9b5, 0xf2f2ee, 0xa8a8a6];
+const WARM = [0xf0b45a, 0xe58a5a, 0xf2c86b, 0xd9a35a, 0xf09a7a, 0xe8c27a], COOL = [0x5aa6a0, 0x7a9ad8, 0xa87ac8, 0x6ac08a, 0x4f8fb8, 0xd27aa0],
+  DARK = [0x7a3a4e, 0x5a3a6a, 0x8a4a42, 0x3f4a78, 0x9a5a4a, 0x2f6a6a], GREY = [0xb8a2d6, 0x94b4de, 0xe2b09a, 0x9ccab0, 0xd6a2c4, 0xc8c0e8, 0xe6c88e];
+const TRIM = [0xf6ecd6, 0x2a2430, 0xffffff, 0x3a2a24];
+const NEON = [0xff3d8b, 0x3dfcff, 0xfff03d, 0x8bff3d, 0xff7a2a, 0xb06aff];
 let roofSeed = 4040; const rr = () => (roofSeed = (roofSeed * 16807) % 2147483647) / 2147483647;
 const inkPos = [];
 function inkBox(x, y, z, w, h, d) { // ink outline of a box (the sketchy line work on the distant towers)
@@ -483,18 +513,36 @@ function inkBox(x, y, z, w, h, d) { // ink outline of a box (the sketchy line wo
   for (let i = 0; i < p.length; i += 3) inkPos.push(p[i] + x, p[i + 1] + y, p[i + 2] + z);
 }
 function tower(B, x, z, w, d, h, far) {
-  const lit = x < 0 ? .75 : .35; // sun from the left: west towers glow ochre, east ones sit in maroon shadow
-  const col = far ? GREY[rr() * GREY.length | 0] : rr() < lit ? WARM[rr() * WARM.length | 0] : DARK[rr() * DARK.length | 0];
-  let y = 0, cw = w, cd = d; const tiers = h > 90 && rr() < .7 ? 2 + (rr() * 2 | 0) : 1;
-  for (let t = 0; t < tiers; t++) { // stepped setbacks
-    const th = t === tiers - 1 ? h - y : h * (.55 + rr() * .2) - y; if (th <= 2) break;
-    const g = box(cw, th, cd), uv = g.attributes.uv, S = [[cd, th], [cd, th], [0, 0], [0, 0], [cw, th], [cw, th]];
-    for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const j = f * 4 + v; uv.setXY(j, S[f][0] ? uv.getX(j) * S[f][0] / 8 : 0, S[f][1] ? uv.getY(j) * S[f][1] / 12 : 0); }
-    B.add(g, far ? RMAT.flat : RMAT.bld, col, T(x, y + th / 2, z)); if (far || rr() < .5) inkBox(x, y + th / 2, z, cw, th, cd);
-    y += th; cw *= .72; cd *= .72;
+  const lit = x < 0 ? .75 : .4; // sun from the left: west towers glow warm, east ones sit in deep jewel-tone shade
+  const col = far ? GREY[rr() * GREY.length | 0] : rr() < lit ? (rr() < .6 ? WARM : COOL)[rr() * 6 | 0] : DARK[rr() * DARK.length | 0];
+  const trim = TRIM[rr() * TRIM.length | 0], round = !far && rr() < .2;
+  let y = 0, cw = w, cd = d; const tiers = h > 80 && rr() < .75 ? 2 + (rr() * 2 | 0) : 1;
+  for (let t = 0; t < tiers; t++) { // stepped setbacks, each capped with a cornice
+    const th = t === tiers - 1 ? h - y : h * (.5 + rr() * .2) - y; if (th <= 2) break;
+    if (round) { const r = Math.min(cw, cd) / 2, g = new THREE.CylinderGeometry(r, r, th, 14, 1), uv = g.attributes.uv;
+      for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * Math.PI * r * 2 / 8, uv.getY(k) * th / 12);
+      B.add(g, RMAT.bld, col, T(x, y + th / 2, z)); if (!far) B.add(new THREE.CylinderGeometry(r + .5, r + .5, .9, 14), RMAT.flat, trim, T(x, y + th - .45, z)); }
+    else {
+      const g = box(cw, th, cd), uv = g.attributes.uv, S = [[cd, th], [cd, th], [0, 0], [0, 0], [cw, th], [cw, th]];
+      for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const j = f * 4 + v; uv.setXY(j, S[f][0] ? uv.getX(j) * S[f][0] / 8 : 0, S[f][1] ? uv.getY(j) * S[f][1] / 12 : 0); }
+      B.add(g, RMAT.bld, col, T(x, y + th / 2, z)); if (far || rr() < .35) inkBox(x, y + th / 2, z, cw, th, cd);
+      if (!far) { B.add(box(cw + .9, 1, cd + .9), RMAT.flat, trim, T(x, y + th - .5, z)); if (th > 30 && rr() < .6) B.add(box(cw + .5, .6, cd + .5), RMAT.flat, trim, T(x, y + th * .5, z)); }
+    }
+    if (!far && t === 0 && rr() < .45) { // a neon sign / billboard facing the canyon
+      const sx = x - Math.sign(x) * (cw / 2 + .35), sy = 18 + rr() * Math.min(60, th - 24), nc = NEON[rr() * NEON.length | 0];
+      if (rr() < .5) { B.add(box(.5, 4 + rr() * 3, 9 + rr() * 6), RMAT.neon, nc, T(sx, sy, z)); B.add(box(.6, 5.5 + rr() * 3, 10.5 + rr() * 6), RMAT.flat, 0x1a1420, T(sx + Math.sign(x) * .1, sy, z)); }
+      else B.add(box(.5, 12 + rr() * 10, 2.4), RMAT.neon, nc, T(sx, sy + 6, z + (rr() - .5) * cd * .5));
+    }
+    y += th; cw *= .74; cd *= .74;
   }
-  if (rr() < (far ? .35 : .2)) { const sh = 6 + rr() * 22; B.add(new THREE.ConeGeometry(Math.min(cw, cd) * .35, sh, 4), RMAT.flat, far ? 0x8f8f8c : 0x3a3030, T(x, y + sh / 2, z, 0, Math.PI / 4)); }
-  else B.add(box(cw * .5, 2, cd * .5), RMAT.flat, far ? 0xbdbdb9 : 0x5a4a44, T(x, y + 1, z));
+  const top = rr(), rc = Math.min(cw, cd);
+  if (far) { if (top < .35) { const sh = 6 + rr() * 22; B.add(new THREE.ConeGeometry(rc * .35, sh, 4), RMAT.flat, 0xb9b0c8, T(x, y + sh / 2, z, 0, Math.PI / 4)); } return; }
+  if (top < .22) { B.add(new THREE.SphereGeometry(rc * .42, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), RMAT.flat, rr() < .5 ? 0x5ac8a8 : 0xd8a040, T(x, y, z)); B.add(new THREE.CylinderGeometry(.15, .15, 7, 6), RMAT.flat, 0x2a2430, T(x, y + rc * .42 + 3, z)); }
+  else if (top < .5) { const tx = x + (rr() - .5) * cw * .4, tz = z + (rr() - .5) * cd * .4; // water tank on stilts
+    B.add(new THREE.CylinderGeometry(1.8, 1.8, 3.2, 12), RMAT.flat, 0x8a5a3a, T(tx, y + 4.4, tz)); B.add(new THREE.ConeGeometry(2, 1.3, 12), RMAT.flat, 0x4a3226, T(tx, y + 6.65, tz));
+    for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B.add(box(.25, 2.8, .25), RMAT.flat, 0x2a2018, T(tx + a * 1.2, y + 1.4, tz + b * 1.2)); }
+  else if (top < .68) { const sh = 10 + rr() * 26; B.add(new THREE.ConeGeometry(rc * .3, sh, 4), RMAT.flat, rr() < .5 ? 0xe8c070 : 0x3a3048, T(x, y + sh / 2, z, 0, Math.PI / 4)); }
+  else { B.add(box(rc * .45, 2.4, rc * .45), RMAT.flat, 0x5a4a54, T(x, y + 1.2, z)); B.add(new THREE.CylinderGeometry(.12, .12, 9, 5), RMAT.flat, 0xdedede, T(x, y + 6.9, z)); }
 }
 { // the city: a canyon street running away from us (−Z) with cross streets; our own tower at the origin
   const B = bag(), F = bag();
@@ -521,13 +569,30 @@ function tower(B, x, z, w, d, h, far) {
   roof.add(B.build(), F.build(false));
   const ig = new THREE.BufferGeometry(); ig.setAttribute('position', new THREE.Float32BufferAttribute(inkPos, 3)); roof.add(new THREE.LineSegments(ig, RMAT.ink));
 }
-roof.add(new THREE.HemisphereLight(0xd6dcea, 0x8a5a4a, 1.9)); roof.add(new THREE.AmbientLight(0x6a4a5a, .6)); // shadow sides stay warm maroon, not black
+// city life: a flock of birds wheeling through the canyon, traffic crawling along the street far below
+const BIRDS = []; {
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, .5, -1.4, .35, 0, 0, 0, -.5, 0, 0, .5, 0, 0, -.5, 1.4, .35, 0], 3)); g.computeVertexNormals();
+  const m = new THREE.MeshBasicMaterial({ color: 0x2a2228, side: THREE.DoubleSide });
+  for (let i = 0; i < 18; i++) { const b = new THREE.Mesh(g, m); b.userData = { r: 9 + rr() * 16, a: rr() * 6.3, sp: .25 + rr() * .2, y: 112 + rr() * 26, cz: -30 - rr() * 30, ph: rr() * 6 }; roof.add(b); BIRDS.push(b); } }
+const carGeo = (() => { const B = bag(), m = RMAT.flat; // body (tinted per car), dark glass cabin, black wheels
+  B.add(box(2, .8, 4.4), m, 0xffffff, T(0, .65, 0)); B.add(box(1.75, .7, 2.3), m, 0x2a3440, T(0, 1.4, -.2)); B.add(box(1.8, .12, 2.4), m, 0xffffff, T(0, 1.8, -.2));
+  for (const [x, z] of [[-1, -1.4], [1, -1.4], [-1, 1.4], [1, 1.4]]) B.add(new THREE.CylinderGeometry(.42, .42, .3, 10), m, 0x111111, T(x, .42, z, 0, 0, Math.PI / 2));
+  return B.build(false).children[0].geometry; })();
+const CARS = new THREE.InstancedMesh(carGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .45, metalness: .1 }), 30); CARS.frustumCulled = false; roof.add(CARS);
+const STRAFFIC = []; { const cc = [0xffd23a, 0xe8453c, 0x3a7ae8, 0xf2f2f2, 0x2a2a2a, 0x5ac88a, 0xff8a3a];
+  for (let i = 0; i < 30; i++) { const lane = [-10, -6.5, 6.5, 10][i % 4]; STRAFFIC.push({ x: lane, z: -20 - rr() * 420, v: (lane < 0 ? 1 : -1) * (10 + rr() * 6) }); CARS.setColorAt(i, new THREE.Color(cc[i % cc.length])); } }
+const _cm = new THREE.Matrix4();
+function stepCityLife(dt) {
+  for (const b of BIRDS) { const u = b.userData; u.a += dt * u.sp; b.position.set(Math.cos(u.a) * u.r, u.y + Math.sin(u.a * 2 + u.ph) * 2, u.cz + Math.sin(u.a) * u.r * .7); b.rotation.set(0, -u.a, 0); b.scale.set(1, Math.cos(clock * 9 + u.ph), 1); }
+  STRAFFIC.forEach((c, i) => { c.z += c.v * dt; if (c.z > -10) c.z -= 430; if (c.z < -440) c.z += 430; CARS.setMatrixAt(i, _cm.makeRotationY(c.v > 0 ? 0 : Math.PI).setPosition(c.x, 0, c.z)); }); CARS.instanceMatrix.needsUpdate = true;
+}
+roof.add(new THREE.HemisphereLight(0xd6dcea, 0x8a5a4a, 1.25)); roof.add(new THREE.AmbientLight(0x6a4a5a, .35)); // shadow sides stay warm maroon, not black
 const roofSun = new THREE.DirectionalLight(0xffd49a, 3.2); roofSun.position.set(-120, 220, -40); roofSun.target.position.set(0, 60, -120); roof.add(roofSun, roofSun.target);
 const roofKey = new THREE.DirectionalLight(0xfff0dc, 1.4); roofKey.position.set(-6, 150, 8); roofKey.target.position.set(0, ROOF_Y, 0); roofKey.castShadow = true;
 Object.assign(roofKey.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 1, far: 30 }); roofKey.shadow.mapSize.set(1024, 1024); roof.add(roofKey, roofKey.target);
 // soft blue toon clouds drifting through the canyon (the painting's blue puffs)
 const RCLOUD = createGas(roof, { max: 160, palette: { lit: 0xc4dbe8, mid: 0x9fc0d4, shade: 0x7a9fb8, deep: 0x5f829c, line: 0x35536b } });
-RCLOUD.uniforms.uOutline.value = .03; RCLOUD.setFog(HAZE, 200, 650); RCLOUD.uniforms.uL.value.set(-.6, .7, .2);
+RCLOUD.uniforms.uOutline.value = .03; RCLOUD.setFog(HAZE, 260, 850); RCLOUD.uniforms.uL.value.set(-.6, .7, .2);
 { roofSeed = 77; const clus = [[-14, 118, -26, 7], [16, 106, -40, 8], [-26, 80, -70, 10], [24, 70, -95, 11], [-8, 128, -12, 4], [11, 132, -6, 3.5], [-40, 120, -150, 14], [40, 100, -180, 15], [0, 60, -130, 12], [-6, 136.5, 6, 3], [9, 135.5, 9, 3.5]];
   for (const [cx, cy, cz, w] of clus) for (let k = 0, n = 5 + (rr() * 4 | 0); k < n; k++) { const u = rr() * 2 - 1;
     RCLOUD.P.push({ x: cx + u * w, y: cy + rr() * w * .35, z: cz + (rr() - .5) * w * .6, bx: cx + u * w, vx: 0, vy: 0, vz: 0, age: .2, life: 1e9, s0: 0, s1: 0, sz: w * (.45 + rr() * .3), drag: 0, seed: rr(), rx: rr() * 6, ry: rr() * 6, heat: 0, squash: .75, buoy: 0 }); }
@@ -538,26 +603,28 @@ boardReady.then(() => { const c = boardG.children[0].clone(true); streetBoard.ad
 
 const LAND = V3(0, 0, -56), LEDGE = V3(8, ROOF_Y + 1.1, -2.4);
 // he faces his board, far below; the camera floats high over his shoulder looking steeply down the canyon (the painting's POV)
-const FWD = V3(LAND.x - LEDGE.x, 0, LAND.z - LEDGE.z).normalize(), RGT = V3(-FWD.z, 0, FWD.x), FACE = Math.atan2(FWD.x, FWD.z);
+const FWD = V3(LAND.x - LEDGE.x, 0, LAND.z - LEDGE.z).normalize(), RGT = V3(-FWD.z, 0, FWD.x), FACE = Math.atan2(-FWD.z, FWD.x); // the model's nose is +X
+const TURN = .9; // fraction of the way to face the camera; on the ledge he stands turned toward the camera; in the crouch he squares up to the drop
 const at = (f, u, r) => LEDGE.clone().addScaledVector(FWD, f).addScaledVector(RGT, r).add(V3(0, u, 0));
 const AK = {
-  close: { pos: at(-1.5, 1.15, .45), look: at(2.5, .25, -.2), fov: 40 },
-  wide: { pos: at(-1.6, 2.8, 1.4), look: at(30, -21, -9), fov: 55 },
+  close: { pos: at(-.45, .78, 1.45), look: at(.15, .52, 0), fov: 34 },   // along the ledge, face to face: his mask fills the frame, the drop behind him
+  wide: { pos: at(-.85, 1.05, 2.05), look: at(1.5, -.9, -.6), fov: 50 },  // pull back along the ledge: him turned to us, the canyon falling away past him
 };
+const LEDGE_YAW = (() => { const d = AK.wide.pos.clone().sub(LEDGE); let a = Math.atan2(-d.z, d.x) - FACE; a = Math.atan2(Math.sin(a), Math.cos(a)); return a * TURN; })();
 const INTRO = { on: false, ph: 'off', t: 0, a: null, b: null, bt: 0, dur: 1 };
 function camKey(k, dur) { INTRO.a = { pos: camState.pos.clone(), look: camState.look.clone(), fov: camState.fov }; INTRO.b = AK[k]; INTRO.bt = 0; INTRO.dur = dur; }
 function stepCamKey(dt) { if (!INTRO.b) return; INTRO.bt = Math.min(1, INTRO.bt + dt / INTRO.dur); const k = ease(INTRO.bt); camState.pos.lerpVectors(INTRO.a.pos, INTRO.b.pos, k); camState.look.lerpVectors(INTRO.a.look, INTRO.b.look, k); camState.fov = lerp(INTRO.a.fov, INTRO.b.fov, k); }
 function startIntro() {
   INTRO.on = true; INTRO.ph = 'pull'; INTRO.t = 0; roof.add(skater); GAS.attach(roof); CLING.attach(roof);
-  for (const S of [GAS, CLING]) { S.setFog(HAZE, 150, 620); S.uniforms.uAmb.value.setRGB(1, 1, 1); } GAS.air.set(.6, 0, -.4); GAS.clear();
-  skater.position.copy(LEDGE); skater.rotation.set(0, FACE, 0, 'YXZ'); boardG.visible = false; charG.position.set(0, 0, 0); charG.rotation.set(0, 0, 0);
+  for (const S of [GAS, CLING]) { S.setFog(HAZE, 220, 820); S.uniforms.uAmb.value.setRGB(1, 1, 1); } GAS.air.set(.6, 0, -.4); GAS.clear();
+  skater.position.copy(LEDGE); skater.rotation.set(0, FACE + LEDGE_YAW, 0, 'YXZ'); streetBoard.rotation.y = FACE; boardG.visible = false; charG.position.set(0, 0, 0); charG.rotation.set(0, 0, 0);
   Object.assign(camState, { pos: AK.close.pos.clone(), look: AK.close.look.clone(), fov: AK.close.fov, par: .15, roll: 0, ap: .07 }); camKey('wide', 4.2);
   windStart();
 }
 function rideClick() { if (INTRO.ph !== 'wait') return; $('ride').classList.remove('on'); startMusic(); INTRO.ph = 'crouch'; INTRO.t = 0; }
 const _fp = V3(), _fl = V3(), _cpo = V3(), _clo = V3();
 function stepIntro(dt) {
-  INTRO.t += dt; const t = INTRO.t; RCLOUD.P.forEach((p, i) => { p.x = p.bx + Math.sin(clock * .05 + i) * 1.5; }); RCLOUD.step(0, clock);
+  INTRO.t += dt; const t = INTRO.t; stepCityLife(dt); RCLOUD.P.forEach((p, i) => { p.x = p.bx + Math.sin(clock * .05 + i) * 1.5; }); RCLOUD.step(0, clock);
   if (INTRO.ph === 'pull' || INTRO.ph === 'wait') { // peering over the edge in the wind: weight shifts, looks around, leans to look down
     stepCamKey(dt); RIG.headYaw = Math.sin(clock * .45) * .35 + Math.sin(clock * 1.3) * .05; RIG.crouch = .15 + Math.max(0, Math.sin(clock * .7)) * .2;
     charG.position.x = Math.sin(clock * .8) * .03; RIG.stT = Math.sin(clock * 2.4) * .025; RIG.sniffIdle = Math.max(0, Math.sin(clock * 9)) * (Math.sin(clock * .9) > .5 ? 1 : 0);
@@ -566,22 +633,22 @@ function stepIntro(dt) {
   }
   if (INTRO.ph === 'crouch') { // anticipation: sink, lean back, arms back, hood tip flicks
     const k = ease(clamp(t / .55, 0, 1)); RIG.crouch = .15 + k * .9; RIG.stT = -.32 * k + (k > .9 ? Math.sin(t * 60) * .015 : 0); RIG.armsUp = -k * .5; RIG.headYaw = lerp(RIG.headYaw ?? 0, 0, k);
-    skater.rotation.x = -k * .18; windGust(.5);
+    skater.rotation.z = k * .18; skater.rotation.y = FACE + LEDGE_YAW * (1 - ease(clamp(t / .45, 0, 1))); windGust(.5);
     if (t > .6) { INTRO.ph = 'leap'; INTRO.t = 0; RIG.squish = 0; RIG.stv = 7; RIG.stT = .26; whoosh(1.2); clack(.3); return; }
   }
   if (INTRO.ph === 'leap') { // spring up and out over the edge, body stretched
     const k = clamp(t / .5, 0, 1); RIG.crouch = Math.max(0, 1 - k * 4) * 1.05; RIG.armsUp = lerp(-.5, .85, ease(Math.min(1, k * 2)));
-    skater.position.copy(LEDGE).addScaledVector(FWD, k * 3.2).y += Math.sin(k * Math.PI) * 1.5; skater.rotation.x = lerp(-.18, .55, ease(k));
+    skater.position.copy(LEDGE).addScaledVector(FWD, k * 3.2).y += Math.sin(k * Math.PI) * 1.5; skater.rotation.z = -lerp(-.18, .55, ease(k));
     RIG.stT = lerp(.26, .12, k);
-    _fl.copy(skater.position).addScaledVector(FWD, 2.5).y -= 1.2; camState.look.lerp(_fl, damp(dt, 9)); _fp.copy(skater.position).addScaledVector(FWD, -3.4).addScaledVector(RGT, 1.1).y += 2.6; camState.pos.lerp(_fp, damp(dt, 3.5)); camState.fov = lerp(camState.fov, 55, damp(dt, 3));
+    _fl.copy(skater.position).addScaledVector(FWD, .8).y -= .1; camState.look.lerp(_fl, damp(dt, 12)); _fp.copy(skater.position).addScaledVector(FWD, -3.4).addScaledVector(RGT, 1.1).y += 2.6; camState.pos.lerp(_fp, damp(dt, 3.5)); camState.fov = lerp(camState.fov, 55, damp(dt, 3));
     if (t >= .5) { INTRO.ph = 'fall'; INTRO.t = 0; INTRO.f0 = skater.position.clone(); INTRO.blend = true; INTRO.cp0 = camState.pos.clone(); INTRO.cl0 = camState.look.clone(); fallSound(); return; }
   }
   if (INTRO.ph === 'fall') { // the dive: gravity-accelerated drop between the towers, arms spread, then a forward flip to land feet-first
     const D = 2.5, u = clamp(t / D, 0, 1), f0 = INTRO.f0;
     const h = 1 - Math.pow(1 - u, 1.6); skater.position.set(lerp(f0.x, LAND.x, h) + RGT.x * Math.sin(u * Math.PI) * 1.2, lerp(f0.y, 0, u * u), lerp(f0.z, LAND.z, h) + RGT.z * Math.sin(u * Math.PI) * 1.2);
     const flip = clamp((u - .62) / .3, 0, 1); // dive at ~70° → forward flip (2π) → upright
-    skater.rotation.x = lerp(.55, 1.2, Math.min(1, u / .5)) * (1 - ease(flip)) + ease(flip) * Math.PI * 2 * (1 - Math.pow(1 - flip, 2)) * 0 + (flip > 0 ? ease(flip) * Math.PI * 2 : 0);
-    skater.rotation.z = Math.sin(u * 9) * .06 * (1 - flip);
+    skater.rotation.z = -(lerp(.55, 1.2, Math.min(1, u / .5)) * (1 - ease(flip)) + ease(flip) * Math.PI * 2 * (1 - Math.pow(1 - flip, 2)) * 0 + (flip > 0 ? ease(flip) * Math.PI * 2 : 0)); // pitch: the model nose is +X, so pitch is about Z
+    skater.rotation.x = Math.sin(u * 9) * .06 * (1 - flip);
     RIG.armsUp = flip < 1 ? .75 - flip * .55 : .2; RIG.flail = (Math.sin(clock * 13) * .22 + Math.sin(clock * 21) * .08) * (1 - flip); RIG.crouch = flip * .7; RIG.stT = .14 * (1 - flip) - .24 * Math.sin(flip * Math.PI) + (flip >= 1 ? .08 : 0);
     if (R01() < dt * 14) { buttWorld(); GAS.emit(_bp.x, _bp.y, _bp.z, { vx: 0, vy: 6, vz: 0, life: .8, s0: .04, s1: .14, heat: 1, drag: 3 }); } // nervous toots stream up
     _fp.copy(skater.position); // chase camera: above-behind, swinging low and to the side for the landing
@@ -720,5 +787,5 @@ for (const [k, label] of [['x', 'X'], ['telegram', 'TG'], ['chart', 'Chart'], ['
 $('tick').textContent = SITE.ticker;
 if (SITE.ca) { const code = document.createElement('code'); code.textContent = SITE.ca; const b = document.createElement('button'); b.className = 'ca-copy'; b.type = 'button'; b.textContent = 'Copy'; b.onclick = async () => { try { await navigator.clipboard.writeText(SITE.ca); b.textContent = 'Copied'; } catch { b.textContent = 'Ctrl+C'; } setTimeout(() => { b.textContent = 'Copy'; }, 1500); }; $('ca').replaceChildren(code, b); }
 
-window.__sn = { RIG, THREE, R, scene, roof, cam, camState, BONES, skater, charG, boardG, cops, traffic, GAS, CLOUDS, GAL, INTRO, STATIONS, go, tick, fartBurst, post, get station() { return station; } };
+window.__sn = { REST, ABT, RIG, THREE, R, scene, roof, cam, camState, BONES, skater, charG, boardG, cops, traffic, GAS, CLOUDS, GAL, INTRO, STATIONS, go, tick, fartBurst, post, get station() { return station; } };
 updateCamera(0); if (!Q.has('still')) raf = requestAnimationFrame(frame); // ?still: no loop (headless tests drive tick())
