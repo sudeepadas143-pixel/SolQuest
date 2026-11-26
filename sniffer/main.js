@@ -45,13 +45,7 @@ const skyU = { uHor: { value: SKY.hor.clone() }, uMid: { value: SKY.mid.clone() 
 const SKY_GLSL = `uniform vec3 uHor,uMid,uTop,uSun;
 vec3 skyCol(vec3 d){float y=d.y;vec3 c=mix(uHor,uMid,smoothstep(.0,.28,y));c=mix(c,uTop,smoothstep(.28,.85,y));c=mix(c,uHor*.85,smoothstep(0.,-.25,y));
   float s=max(dot(d,uSun),0.);return c+vec3(1.,.55,.3)*pow(s,7.)*.45+vec3(1.,.8,.55)*pow(s,60.)*.7;}`;
-{ // patch three's fog: fade to the sky colour in the view direction
-  const C = THREE.ShaderChunk;
-  C.fog_pars_vertex += '\n#ifdef USE_FOG\nvarying vec3 vFogDir;\n#endif';
-  C.fog_vertex = '#ifdef USE_FOG\nvFogDepth = - mvPosition.z; vFogDir = (modelMatrix * vec4(transformed, 1.)).xyz - cameraPosition;\n#endif';
-  C.fog_pars_fragment += `\n#ifdef USE_FOG\nvarying vec3 vFogDir;\n${SKY_GLSL}\n#endif`;
-  C.fog_fragment = '#ifdef USE_FOG\ngl_FragColor.rgb = mix(gl_FragColor.rgb, skyCol(normalize(vFogDir)), smoothstep(fogNear, fogFar, vFogDepth));\n#endif';
-}
+// fog fades to the horizon colour (the sky dome's horizon band uses the same colour, so far objects melt into it)
 scene.fog = new THREE.Fog(SKY.hor.clone(), 34, 130); scene.background = SKY.hor.clone();
 const pm = new THREE.PMREMGenerator(R);
 scene.environment = pm.fromScene(new RoomEnvironment(), .04).texture; scene.environmentIntensity = .4;
@@ -281,7 +275,7 @@ const _cl = V3();
 function stepCling() { // follow his butt every frame, breathing gently
   charG.updateMatrixWorld(true); CLING.mesh.visible = CLING.hull.visible = !!BONES.body;
   CLING.P.forEach((p, i) => { _cl.set(p.lx, p.ly, p.lz).applyMatrix4(charG.matrixWorld); p.x = _cl.x; p.y = _cl.y + Math.sin(clock * 3 + i) * .008; p.z = _cl.z;
-    const k = 1 + Math.sin(clock * 4.2 + i * 1.7) * .08; p.s0 = p.s1 = CLING_P[i][3] * CS * k; p.heat = .25 + Math.max(0, Math.sin(clock * 2 + i)) * .2; });
+    const k = (1 + Math.sin(clock * 4.2 + i * 1.7) * .08) * (INTRO.on && (INTRO.ph === 'pull' || INTRO.ph === 'wait' || INTRO.ph === 'crouch') ? .45 : 1); p.s0 = p.s1 = CLING_P[i][3] * CS * k; p.heat = .25 + Math.max(0, Math.sin(clock * 2 + i)) * .2; });
   CLING.step(0, clock);
 }
 function fartBurst(n = 30, power = 1) { buttWorld(); GAS.burst(_bp, _bd, n, power); RIG.squish = 1; fartSound(power, .35 + power * .35 + R01() * .3); }
@@ -301,7 +295,7 @@ function poseRider(dt, mode) {
   RIG.squish = Math.max(0, RIG.squish - dt * 3.5); const sq = Math.sin(RIG.squish * Math.PI) * .1;
   charG.scale.set(CS * (1 + sq * .5), CS * (1 - sq - RIG.crouch * .08), CS * (1 + sq * .5));
   charG.rotation.x = RIG.lean * .3 + RIG.crouch * .1 - .04 + Math.sin(t * 2.2) * .012 * b; // lean the whole toy, not the robe
-  if (mode !== 'alley' || INTRO.ph === 'charge' || INTRO.ph === 'blast') charG.position.y = DECK + Math.sin(t * 9) * .004 * b;
+  charG.position.y = (mode !== 'alley' || INTRO.ph === 'land') ? DECK + Math.sin(t * 9) * .004 * b : 0; // on the ledge he stands on concrete, not the deck
   charG.updateMatrixWorld(true);
   const X = charAxis(1, 0, 0), Y = charAxis(0, 1, 0), Z = charAxis(0, 0, 1);
   let yaw = mode === 'alley' ? (RIG.headYaw ?? 0) : .32, pitch = 0;
@@ -313,7 +307,7 @@ function poseRider(dt, mode) {
   rotW(BONES.head, Y, RIG.yaw); rotW(BONES.head, X, -RIG.pitch + Math.sin(t * 2.1) * .02 * b); rotW(BONES.head, Z, -RIG.lean * .25);
   headTop.getWorldPosition(_p); const T_ = RIG.tip, vy = dt > 0 ? (_p.y - T_.py) / dt : 0, ay = dt > 0 ? (vy - T_.pv) / dt : 0; T_.py = _p.y; T_.pv = vy;
   for (let i = 0; i < 3; i++) { const h = dt / 3; T_.v += (-110 * T_.x - 5 * T_.v - clamp(ay, -60, 60) * .8) * h; T_.x += T_.v * h; }
-  const sw = clamp(T_.x, -.6, .6), flut = mode === 'alley' ? .01 : .05;
+  const sw = clamp(T_.x, -.6, .6), flut = mode === 'alley' ? (INTRO.ph === 'fall' ? .14 : .08) : .05; // rooftop wind / free-fall flutter
   for (const [n, k] of [['tip1', .4], ['tip2', .7], ['tip3', 1]]) { rotW(BONES[n], X, sw * k * .7 + Math.sin(t * 9 + k * 2) * flut * k * b); rotW(BONES[n], Z, Math.sin(t * 6.5 + k) * flut * k * b); }
   const up = .04 + RIG.armsUp * .25 + Math.sin(t * 2.3) * .025 * b; // the Meshy arms are part of the robe: tiny swings only
   rotW(BONES.arm_L, Z, up + RIG.lean * .15); rotW(BONES.arm_R, Z, -(up - RIG.lean * .15));
@@ -417,11 +411,11 @@ const galFlash = () => { const f = $('flash'); f.classList.remove('go'); void f.
 function setGalUI(on) { const g = $('gal'); g.classList.toggle('on', on); g.setAttribute('aria-hidden', String(!on)); g.toggleAttribute('inert', !on); }
 function galCaption() { const m = MEMES[GAL.idx], cap = $('galCap'), b = document.createElement('b'); b.textContent = m.name; cap.replaceChildren(`${GAL.idx + 1}/${MEMES.length} · It's `, b, `. ${m.ask}`); }
 function startGallery() { Object.assign(GAL, { on: true, t: 0, sky: false, ui: 0, fly: 0, launched: false }); galCaption(); }
-function setSky(on) { SUN.set(on ? -.55 : .86, on ? .3 : .12, on ? .78 : -.5).normalize(); const P = on ? SKY_G : SKY; skyU.uHor.value.copy(P.hor); skyU.uMid.value.copy(P.mid); skyU.uTop.value.copy(P.top); scene.fog.far = on ? 400 : 130; GAS.setFog(P.hor, on ? 60 : 40, on ? 300 : 130); fill.intensity = on ? 2.6 : .6; }
+function setSky(on) { SUN.set(on ? -.55 : .86, on ? .3 : .12, on ? .78 : -.5).normalize(); const P = on ? SKY_G : SKY; scene.fog.color.copy(P.hor); skyU.uHor.value.copy(P.hor); skyU.uMid.value.copy(P.mid); skyU.uTop.value.copy(P.top); scene.fog.far = on ? 400 : 130; GAS.setFog(P.hor, on ? 60 : 40, on ? 300 : 130); fill.intensity = on ? 2.6 : .6; }
 function endGallery() {
   $('galImg').classList.remove('on'); GAL.hov = 0; if (!GAL.on) return; const wasSky = GAL.sky; Object.assign(GAL, { on: false, sky: false, ui: 0 });
   if (wasSky) galFlash(); for (const o of [...STREET, ...traffic, ...cops]) o.visible = true; CLOUDS.mesh.visible = CLOUDS.hull.visible = false; setSky(false);
-  GAS.air.set(-SPEED, 0, 0); GAS.clear(); skater.position.set(0, 0, LANE); skater.rotation.set(0, 0, 0); RIG.crouch = RIG.armsUp = 0; charG.position.x = 0;
+  GAS.air.set(-SPEED, 0, 0); GAS.clear(); skater.position.set(0, 0, LANE); skater.rotation.set(0, 0, 0, 'XYZ'); RIG.crouch = RIG.armsUp = 0; charG.position.x = 0;
   card.visible = false; setGalUI(false); cvs.style.cursor = '';
 }
 function showMeme(dir) { if (!GAL.sky || GAL.slide < 1) return; GAL.idx = (GAL.idx + dir + MEMES.length) % MEMES.length; GAL.slide = 0; GAL.side ^= 1; const f = card.userData.faces[GAL.side]; f.map = memeMap(GAL.idx); f.needsUpdate = true; GAL.yaw0 = GAL.yaw; GAL.yaw += dir * Math.PI; galCaption(); pfft(); }
@@ -460,67 +454,154 @@ function stepGallery(dt) {
   for (const [id, s] of [['galPrev', -1], ['galNext', 1]]) { const p = _gp.copy(cam.position).addScaledVector(_gz, D).addScaledVector(_gx, cx + s * (CARD * sc * .5 + .3 * sc)).addScaledVector(_gy, cy).project(cam); Object.assign($(id).style, { left: `${(p.x + 1) / 2 * 100}%`, top: `${(1 - p.y) / 2 * 100}%` }); }
 }
 
-/* ================================================================== INTRO: a back alley. Manhole steam → pull back → RIDE → hop on, charge, gas the screen */
-const alley = new THREE.Scene(); alley.background = new THREE.Color(0x0b0714); alley.fog = new THREE.Fog(0x0b0714, 4, 15); alley.environment = scene.environment; alley.environmentIntensity = .25;
-const brickTex = canvasTex(32, 32, (x, w, h) => { x.fillStyle = '#4a2a2e'; x.fillRect(0, 0, w, h); for (let r = 0; r < 8; r++) for (let c = 0; c < 4; c++) { const v = 80 + rnd() * 40 | 0; x.fillStyle = `rgb(${v + 30},${v - 20},${v - 25})`; x.fillRect(c * 8 + (r % 2) * 4, r * 4, 7, 3); } }, [6, 2]);
-const wetTex = canvasTex(32, 64, (x, w, h) => { x.fillStyle = '#1c1820'; x.fillRect(0, 0, w, h); specks(x, w, h, 500, () => { const v = 30 + rnd() * 25 | 0; return `rgb(${v},${v - 3},${v + 6})`; }); }, [3, 6]);
-const graffitiTex = canvasTex(128, 64, (x, w, h) => { x.font = 'bold 40px Impact, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.lineWidth = 6; x.strokeStyle = '#10240a'; x.strokeText('SNIFF', w / 2, h / 2); x.fillStyle = '#b8e07a'; x.fillText('SNIFF', w / 2, h / 2); for (let i = 0; i < 9; i++) x.fillRect(20 + rnd() * 88, h / 2 + 12, 2, 6 + rnd() * 18); });
-const noFartTex = canvasTex(32, 32, (x) => { x.fillStyle = '#f2f2ee'; x.fillRect(0, 0, 32, 32); x.strokeStyle = '#c21f2f'; x.lineWidth = 3; x.beginPath(); x.arc(16, 16, 12, 0, 7); x.stroke(); x.fillStyle = '#5a7a3a'; x.beginPath(); x.arc(16, 17, 6, 0, 7); x.fill(); x.beginPath(); x.moveTo(7, 7); x.lineTo(25, 25); x.stroke(); });
-{ const add = (geo, mat, x, y, z, ry = 0, rx = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, ry, 0); m.receiveShadow = true; alley.add(m); return m; };
-  add(new THREE.PlaneGeometry(5, 16), new THREE.MeshStandardMaterial({ map: wetTex, roughness: .3, metalness: .15 }), 0, 0, -3, 0, -Math.PI / 2);
-  const brick = new THREE.MeshStandardMaterial({ map: brickTex, roughness: .95 });
-  add(new THREE.PlaneGeometry(16, 6), brick, -2.3, 3, -3, Math.PI / 2); add(new THREE.PlaneGeometry(16, 6), brick, 2.3, 3, -3, -Math.PI / 2); add(new THREE.PlaneGeometry(5, 6), brick, 0, 3, -10);
-  add(new THREE.PlaneGeometry(2.4, 1.2), new THREE.MeshBasicMaterial({ map: graffitiTex, transparent: true, color: new THREE.Color(.6, .6, .6) }), -2.28, 1.5, -.8, Math.PI / 2);
-  add(new THREE.PlaneGeometry(.5, .5), new THREE.MeshStandardMaterial({ map: noFartTex, roughness: .7 }), 2.28, 1.7, -1.6, -Math.PI / 2);
-  add(box(1.2, 2.1, .1), new THREE.MeshStandardMaterial({ color: 0x2a2f35, roughness: .7 }), 0, 1.05, -9.94); add(box(.5, .18, .05), new THREE.MeshBasicMaterial({ color: new THREE.Color(0x6bff7a).multiplyScalar(2) }), 0, 2.4, -9.9);
-  const B = bag(); B.add(box(1.7, 1.15, 1), MAT.flat, 0x2f5a5a, T(-1.55, .58, -2.2)); B.add(box(1.75, .1, 1.05), MAT.flat, 0x244848, T(-1.55, 1.2, -2.25, -.2));
-  seed = 515; for (let i = 0; i < 5; i++) { const s = .35 + rnd() * .2; B.add(new THREE.IcosahedronGeometry(s, 1), MAT.flat, 0x141418, T(1.7 + (rnd() - .5) * .6, s * .7, -3 + (rnd() - .5) * 1.4, rnd(), rnd(), 0, 1, .75, 1)); }
-  for (const y of [2.6, 2.9]) B.add(cyl(.06, .06, 12, 6), MAT.flat, 0x5a5a62, T(2.18, y, -4, Math.PI / 2)); B.add(cyl(.06, .06, 3.2, 6), MAT.flat, 0x5a5a62, T(2.18, 1.3, -.9));
-  B.add(cyl(.42, .42, .02, 18), MAT.flat, 0x2a2a30, T(.55, .01, .9)); for (let k = 0; k < 4; k++) B.add(box(.5, .022, .05), MAT.glow, 0x7dff5a, T(.55, .012, .72 + k * .12), 2.5);
-  alley.add(B.build()); }
-alley.add(new THREE.HemisphereLight(0x5a4a8a, 0x1a1218, .8));
-const doorLamp = new THREE.PointLight(0xffb36b, 7, 7, 1.6); doorLamp.position.set(0, 2.9, -9.2); alley.add(doorLamp);
-const holeLight = new THREE.PointLight(0x9dff6a, 3.5, 3.5, 1.5); holeLight.position.set(.55, .35, .9); alley.add(holeLight);
-const keyA = new THREE.SpotLight(0xffe2c8, 14, 9, .6, .6, 1.4); keyA.position.set(1.6, 3.2, 2.6); keyA.target.position.set(0, .5, 0); keyA.castShadow = true; alley.add(keyA, keyA.target);
-const copL = [0xff2030, 0x2050ff].map((c, i) => { const l = new THREE.PointLight(c, 0, 12, 1.4); l.position.set(i ? 1.3 : -1.3, 1.7, 5.5); alley.add(l); return l; });
-const AK = { hole: { pos: V3(.55, .55, 1.65), look: V3(.55, 0, .85), fov: 40 }, wide: { pos: V3(.25, 1.05, 3.4), look: V3(.1, .6, 0), fov: 40 }, low: { pos: V3(.8, .55, 2.6), look: V3(0, .5, -2), fov: 46 } };
+/* ================================================================== INTRO: the rooftop. Sniffer on a skyscraper ledge above a canyon of towers →
+   JUMP → anticipation, leap, dive through the city, flip, land on his glowing board in the street, gas → chase */
+const roof = new THREE.Scene();
+const HAZE = new THREE.Color(0xdcdad4);
+roof.background = HAZE.clone(); roof.fog = new THREE.Fog(HAZE.clone(), 150, 620); roof.environment = scene.environment; roof.environmentIntensity = .35;
+const ROOF_Y = 140; // top of Sniffer's building
+// arched-window facade (the painting's warm towers) — white base, tinted per building by vertex colour
+const archTex = canvasTex(16, 32, (x, w, h) => {
+  x.fillStyle = '#fff'; x.fillRect(0, 0, w, h);
+  for (let f = 0; f < 4; f++) for (let c = 0; c < 4; c++) { const X = c * 4 + 1, Y = f * 8 + 2; x.fillStyle = '#2a1c16'; x.fillRect(X, Y + 1, 2, 4); x.fillRect(X + .5, Y, 1, 1); }
+  x.fillStyle = '#e8ddd0'; for (let f = 0; f < 4; f++) x.fillRect(0, f * 8 + 7, w, 1);
+}); archTex.wrapS = archTex.wrapT = THREE.RepeatWrapping;
+const RMAT = {
+  bld: new THREE.MeshStandardMaterial({ vertexColors: true, map: archTex, roughness: .92 }),
+  flat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .9, flatShading: true }),
+  ink: new THREE.LineBasicMaterial({ color: 0x141210, transparent: true, opacity: .75 }),
+};
+const WARM = [0xd9a35a, 0xc99a6a, 0xe0b470, 0xb88a5a], DARK = [0x6a3a3e, 0x5a3a4a, 0x7a4a42, 0x4a3a58, 0x8a5a4a], GREY = [0xe6e6e2, 0xcfcfcb, 0xb9b9b5, 0xf2f2ee, 0xa8a8a6];
+let roofSeed = 4040; const rr = () => (roofSeed = (roofSeed * 16807) % 2147483647) / 2147483647;
+const inkPos = [];
+function inkBox(x, y, z, w, h, d) { // ink outline of a box (the sketchy line work on the distant towers)
+  const g = new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)); const p = g.attributes.position.array;
+  for (let i = 0; i < p.length; i += 3) inkPos.push(p[i] + x, p[i + 1] + y, p[i + 2] + z);
+}
+function tower(B, x, z, w, d, h, far) {
+  const lit = x < 0 ? .75 : .35; // sun from the left: west towers glow ochre, east ones sit in maroon shadow
+  const col = far ? GREY[rr() * GREY.length | 0] : rr() < lit ? WARM[rr() * WARM.length | 0] : DARK[rr() * DARK.length | 0];
+  let y = 0, cw = w, cd = d; const tiers = h > 90 && rr() < .7 ? 2 + (rr() * 2 | 0) : 1;
+  for (let t = 0; t < tiers; t++) { // stepped setbacks
+    const th = t === tiers - 1 ? h - y : h * (.55 + rr() * .2) - y; if (th <= 2) break;
+    const g = box(cw, th, cd), uv = g.attributes.uv, S = [[cd, th], [cd, th], [0, 0], [0, 0], [cw, th], [cw, th]];
+    for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const j = f * 4 + v; uv.setXY(j, S[f][0] ? uv.getX(j) * S[f][0] / 8 : 0, S[f][1] ? uv.getY(j) * S[f][1] / 12 : 0); }
+    B.add(g, far ? RMAT.flat : RMAT.bld, col, T(x, y + th / 2, z)); if (far || rr() < .5) inkBox(x, y + th / 2, z, cw, th, cd);
+    y += th; cw *= .72; cd *= .72;
+  }
+  if (rr() < (far ? .35 : .2)) { const sh = 6 + rr() * 22; B.add(new THREE.ConeGeometry(Math.min(cw, cd) * .35, sh, 4), RMAT.flat, far ? 0x8f8f8c : 0x3a3030, T(x, y + sh / 2, z, 0, Math.PI / 4)); }
+  else B.add(box(cw * .5, 2, cd * .5), RMAT.flat, far ? 0xbdbdb9 : 0x5a4a44, T(x, y + 1, z));
+}
+{ // the city: a canyon street running away from us (−Z) with cross streets; our own tower at the origin
+  const B = bag(), F = bag();
+  B.add(box(30, ROOF_Y, 30), RMAT.bld, 0x8a6a52, T(0, ROOF_Y / 2, 12)); // our building (we stand on its front parapet)
+  B.add(box(30, 1.0, .6), RMAT.flat, 0x8a5a48, T(0, ROOF_Y + .5, -2.4)); // the parapet (brick red)
+  B.add(box(30.3, .16, .85), RMAT.flat, 0xa89276, T(0, ROOF_Y + 1.02, -2.4)); // stone coping he stands on
+  for (let x = -14; x <= 14; x += 3.5) B.add(box(.12, .9, .04), RMAT.flat, 0x6a4034, T(x, ROOF_Y + .45, -2.72)); // pilaster joints
+  B.add(box(30, .2, 26), RMAT.flat, 0x3a3436, T(0, ROOF_Y + .1, 11)); // tar roof deck
+  // rooftop clutter (AC units, vents, a water tank) so the corner of frame reads as a real roof
+  for (const [x, z, w, h, d, c] of [[3, .4, 2.2, 1.1, 1.5, 0x9aa0a6], [5.8, .6, 1.4, .9, 1.4, 0x8a9096], [-2, 2, 2.6, 1.4, 2, 0xa0a4a8], [11.5, 3.5, 1, 1.8, 1, 0x6a6e72]])
+    B.add(box(w, h, d), RMAT.flat, c, T(x, ROOF_Y + .2 + h / 2, z));
+  for (const [x, z] of [[1, -.6], [7.5, 1.2], [9.5, -.4]]) B.add(new THREE.CylinderGeometry(.12, .12, .8, 8), RMAT.flat, 0x5a5e62, T(x, ROOF_Y + .6, z));
+  B.add(new THREE.CylinderGeometry(1.6, 1.6, 2.6, 14), RMAT.flat, 0x7a5236, T(-6, ROOF_Y + 3.6, 6)); B.add(new THREE.ConeGeometry(1.75, .9, 14), RMAT.flat, 0x4a3226, T(-6, ROOF_Y + 5.35, 6));
+  for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B.add(box(.15, 2.3, .15), RMAT.flat, 0x3a2a22, T(-6 + dx * 1.1, ROOF_Y + 1.35, 6 + dz * 1.1));
+  B.add(new THREE.PlaneGeometry(26, 900).rotateX(-Math.PI / 2), RMAT.flat, 0x3a3640, T(0, .01, -420)); // the street below
+  for (let k = 0; k < 40; k++) B.add(box(.25, .02, 3), RMAT.flat, 0xe6dfcf, T(0, .03, -10 - k * 9)); // centre dashes
+  for (let zb = -14; zb > -900; zb -= 46) for (const s of [-1, 1]) for (let col = 0; col < 4; col++) {
+    const far = zb < -230 || col > 1; const x = s * (20 + col * 30 + rr() * 6), z = zb - rr() * 10;
+    const w = 14 + rr() * 12, d = 18 + rr() * 16, near = Math.abs(zb) < 120 && col === 0;
+    const h = near ? 50 + rr() * 70 : far ? 90 + rr() * rr() * 260 : 60 + rr() * 110;
+    tower(far ? F : B, x, z, w, d, h, far);
+  }
+  for (let i = 0; i < 70; i++) { const s = rr() < .5 ? -1 : 1; tower(F, s * (150 + rr() * 300), -200 - rr() * 700, 20 + rr() * 20, 20 + rr() * 20, 80 + rr() * 300, true); } // the far skyline
+  roof.add(B.build(), F.build(false));
+  const ig = new THREE.BufferGeometry(); ig.setAttribute('position', new THREE.Float32BufferAttribute(inkPos, 3)); roof.add(new THREE.LineSegments(ig, RMAT.ink));
+}
+roof.add(new THREE.HemisphereLight(0xd6dcea, 0x8a5a4a, 1.9)); roof.add(new THREE.AmbientLight(0x6a4a5a, .6)); // shadow sides stay warm maroon, not black
+const roofSun = new THREE.DirectionalLight(0xffd49a, 3.2); roofSun.position.set(-120, 220, -40); roofSun.target.position.set(0, 60, -120); roof.add(roofSun, roofSun.target);
+const roofKey = new THREE.DirectionalLight(0xfff0dc, 1.4); roofKey.position.set(-6, 150, 8); roofKey.target.position.set(0, ROOF_Y, 0); roofKey.castShadow = true;
+Object.assign(roofKey.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 1, far: 30 }); roofKey.shadow.mapSize.set(1024, 1024); roof.add(roofKey, roofKey.target);
+// soft blue toon clouds drifting through the canyon (the painting's blue puffs)
+const RCLOUD = createGas(roof, { max: 160, palette: { lit: 0xc4dbe8, mid: 0x9fc0d4, shade: 0x7a9fb8, deep: 0x5f829c, line: 0x35536b } });
+RCLOUD.uniforms.uOutline.value = .03; RCLOUD.setFog(HAZE, 200, 650); RCLOUD.uniforms.uL.value.set(-.6, .7, .2);
+{ roofSeed = 77; const clus = [[-14, 118, -26, 7], [16, 106, -40, 8], [-26, 80, -70, 10], [24, 70, -95, 11], [-8, 128, -12, 4], [11, 132, -6, 3.5], [-40, 120, -150, 14], [40, 100, -180, 15], [0, 60, -130, 12], [-6, 136.5, 6, 3], [9, 135.5, 9, 3.5]];
+  for (const [cx, cy, cz, w] of clus) for (let k = 0, n = 5 + (rr() * 4 | 0); k < n; k++) { const u = rr() * 2 - 1;
+    RCLOUD.P.push({ x: cx + u * w, y: cy + rr() * w * .35, z: cz + (rr() - .5) * w * .6, bx: cx + u * w, vx: 0, vy: 0, vz: 0, age: .2, life: 1e9, s0: 0, s1: 0, sz: w * (.45 + rr() * .3), drag: 0, seed: rr(), rx: rr() * 6, ry: rr() * 6, heat: 0, squash: .75, buoy: 0 }); }
+  for (const p of RCLOUD.P) p.s0 = p.s1 = p.sz; }
+const streetBoard = new THREE.Group(); streetBoard.position.set(0, 0, -56); streetBoard.rotation.y = Math.atan2(-8, -53.6); roof.add(streetBoard);
+const sbGlow = new THREE.PointLight(0x9dff6a, 6, 6, 1.6); sbGlow.position.y = .4; streetBoard.add(sbGlow);
+boardReady.then(() => { const c = boardG.children[0].clone(true); streetBoard.add(c); });
+
+const LAND = V3(0, 0, -56), LEDGE = V3(8, ROOF_Y + 1.1, -2.4);
+// he faces his board, far below; the camera floats high over his shoulder looking steeply down the canyon (the painting's POV)
+const FWD = V3(LAND.x - LEDGE.x, 0, LAND.z - LEDGE.z).normalize(), RGT = V3(-FWD.z, 0, FWD.x), FACE = Math.atan2(FWD.x, FWD.z);
+const at = (f, u, r) => LEDGE.clone().addScaledVector(FWD, f).addScaledVector(RGT, r).add(V3(0, u, 0));
+const AK = {
+  close: { pos: at(-1.5, 1.15, .45), look: at(2.5, .25, -.2), fov: 40 },
+  wide: { pos: at(-1.6, 2.8, 1.4), look: at(30, -21, -9), fov: 55 },
+};
 const INTRO = { on: false, ph: 'off', t: 0, a: null, b: null, bt: 0, dur: 1 };
 function camKey(k, dur) { INTRO.a = { pos: camState.pos.clone(), look: camState.look.clone(), fov: camState.fov }; INTRO.b = AK[k]; INTRO.bt = 0; INTRO.dur = dur; }
 function stepCamKey(dt) { if (!INTRO.b) return; INTRO.bt = Math.min(1, INTRO.bt + dt / INTRO.dur); const k = ease(INTRO.bt); camState.pos.lerpVectors(INTRO.a.pos, INTRO.b.pos, k); camState.look.lerpVectors(INTRO.a.look, INTRO.b.look, k); camState.fov = lerp(INTRO.a.fov, INTRO.b.fov, k); }
 function startIntro() {
-  INTRO.on = true; INTRO.ph = 'pull'; INTRO.t = 0; alley.add(skater); GAS.attach(alley); CLING.attach(alley); CLING.setFog(new THREE.Color(0x0b0714), 4, 15); CLING.uniforms.uAmb.value.setRGB(.42, .62, .4); GAS.air.set(0, 0, 0); GAS.clear(); GAS.setFog(new THREE.Color(0x0b0714), 4, 15); GAS.uniforms.uAmb.value.setRGB(.42, .62, .4);
-  skater.position.set(0, 0, 0); skater.rotation.set(0, Math.PI / 2, 0); boardG.position.set(-.15, 0, .55); boardG.rotation.set(0, .35, 0);
-  charG.position.set(0, 0, -.25); charG.rotation.y = -Math.PI / 2;
-  Object.assign(camState, { pos: AK.hole.pos.clone(), look: AK.hole.look.clone(), fov: AK.hole.fov, par: 0, roll: 0, ap: .8 }); camKey('wide', 4.5); sirenFar();
+  INTRO.on = true; INTRO.ph = 'pull'; INTRO.t = 0; roof.add(skater); GAS.attach(roof); CLING.attach(roof);
+  for (const S of [GAS, CLING]) { S.setFog(HAZE, 150, 620); S.uniforms.uAmb.value.setRGB(1, 1, 1); } GAS.air.set(.6, 0, -.4); GAS.clear();
+  skater.position.copy(LEDGE); skater.rotation.set(0, FACE, 0, 'YXZ'); boardG.visible = false; charG.position.set(0, 0, 0); charG.rotation.set(0, 0, 0);
+  Object.assign(camState, { pos: AK.close.pos.clone(), look: AK.close.look.clone(), fov: AK.close.fov, par: .15, roll: 0, ap: .07 }); camKey('wide', 4.2);
+  windStart();
 }
-function rideClick() { if (INTRO.ph !== 'wait') return; $('ride').classList.remove('on'); INTRO.ph = 'hop'; INTRO.t = 0; camKey('low', .9); clack(.6); }
+function rideClick() { if (INTRO.ph !== 'wait') return; $('ride').classList.remove('on'); startMusic(); INTRO.ph = 'crouch'; INTRO.t = 0; }
+const _fp = V3(), _fl = V3();
 function stepIntro(dt) {
-  INTRO.t += dt; const t = INTRO.t; stepCamKey(dt);
-  const f = (clock * 1.6) % 1; copL[0].intensity = f < .5 && f % .25 < .15 ? 10 : 0; copL[1].intensity = f >= .5 && f % .25 < .15 ? 10 : 0; doorLamp.intensity = 7 * (R01() < .03 ? .2 : 1);
-  if (R01() < dt * 5) GAS.emit(.55 + (R01() - .5) * .5, .05, .9 + (R01() - .5) * .5, { vx: (R01() - .5) * .2, vy: .45 + R01() * .3, vz: (R01() - .5) * .2, life: 2.2, s0: .04, s1: .17, drag: .6, heat: .2, buoy: .45 });
-  if (INTRO.ph === 'pull' || INTRO.ph === 'wait') {
-    RIG.headYaw = Math.sin(clock * .7) * .55 + (copL[0].intensity > 0 ? -.25 : copL[1].intensity > 0 ? .25 : 0);
-    RIG.sniffIdle = Math.max(0, Math.sin(clock * 9)) * (Math.sin(clock * .9) > .3 ? 1 : 0);
-    if (INTRO.ph === 'pull' && t > 4.6) { INTRO.ph = 'wait'; $('ride').classList.add('on'); $('ride').focus({ preventScroll: true }); }
+  INTRO.t += dt; const t = INTRO.t; RCLOUD.P.forEach((p, i) => { p.x = p.bx + Math.sin(clock * .05 + i) * 1.5; }); RCLOUD.step(0, clock);
+  if (INTRO.ph === 'pull' || INTRO.ph === 'wait') { // peering over the edge in the wind: weight shifts, looks around, leans to look down
+    stepCamKey(dt); RIG.headYaw = Math.sin(clock * .45) * .35 + Math.sin(clock * 1.3) * .05; RIG.crouch = .15 + Math.max(0, Math.sin(clock * .7)) * .2;
+    charG.position.x = Math.sin(clock * .8) * .03; RIG.sniffIdle = Math.max(0, Math.sin(clock * 9)) * (Math.sin(clock * .9) > .5 ? 1 : 0);
+    if (INTRO.ph === 'pull' && t > 4.3) { INTRO.ph = 'wait'; INTRO.farted = false; $('ride').textContent = 'JUMP'; $('ride').classList.add('on'); $('ride').focus({ preventScroll: true }); }
+    windGust(.35 + Math.sin(clock * .6) * .15);
   }
-  if (INTRO.ph === 'hop') { RIG.sniffIdle = 0; const k = clamp(t / .45, 0, 1);
-    boardG.rotation.y = lerp(.35, 0, k); boardG.position.set(lerp(-.15, 0, k), 0, lerp(.55, 0, k));
-    charG.position.set(0, DECK * k + Math.sin(k * Math.PI) * .35, lerp(-.25, 0, k)); charG.rotation.y = lerp(-Math.PI / 2, 0, k); RIG.headYaw = lerp(RIG.headYaw ?? 0, 1.2, k * .3);
-    if (k >= 1) { INTRO.ph = 'charge'; INTRO.t = 0; clack(1); chargeSound(); } }
-  if (INTRO.ph === 'charge') { RIG.crouch = clamp(t / .5, 0, 1); charG.position.x = Math.sin(clock * 80) * .012; RIG.headYaw = 1.2;
-    if (R01() < dt * 18) { buttWorld(); GAS.emit(_bp.x, _bp.y, _bp.z, { vx: 0, vy: .3, vz: .4, life: 1, s0: .05, s1: .2, heat: 1 }); }
-    if (t > .95) { INTRO.ph = 'blast'; INTRO.t = 0; RIG.crouch = 0; fartBurst(80, 2.4); megaFart(); } }
-  if (INTRO.ph === 'blast') { skater.position.z = -Math.pow(t, 2) * 9; charG.position.x = 0; RIG.armsUp = .7;
-    buttWorld(); for (let i = 0; i < 3; i++) GAS.emit(_bp.x, _bp.y, _bp.z, { vx: (R01() - .5) * 4, vy: R01() * 1.5, vz: 6 + R01() * 5, life: 2.2, s0: .2, s1: 1.1, drag: .5, heat: 1 });
-    camState.pos.x += Math.sin(clock * 60) * .01; camState.pos.y += Math.sin(clock * 47) * .01;
-    post.comp.uniforms.uGas.value = clamp((t - .5) / .7, 0, 1); if (t > 1.3) endIntro(); }
+  if (INTRO.ph === 'crouch') { // anticipation: sink, lean back, arms back, hood tip flicks
+    const k = ease(clamp(t / .55, 0, 1)); RIG.crouch = .15 + k * .9; RIG.armsUp = -k * .5; RIG.headYaw = lerp(RIG.headYaw ?? 0, 0, k);
+    skater.rotation.x = -k * .18; windGust(.5);
+    if (t > .6) { INTRO.ph = 'leap'; INTRO.t = 0; RIG.squish = 0; whoosh(1.2); clack(.3); return; }
+  }
+  if (INTRO.ph === 'leap') { // spring up and out over the edge, body stretched
+    const k = clamp(t / .5, 0, 1); RIG.crouch = Math.max(0, 1 - k * 4) * 1.05; RIG.armsUp = .9 * Math.sin(Math.min(1, k * 1.5) * Math.PI / 2);
+    skater.position.copy(LEDGE).addScaledVector(FWD, k * 3.2).y += Math.sin(k * Math.PI) * 1.5; skater.rotation.x = lerp(-.18, .55, ease(k));
+    charG.scale.y = CS * (1 + Math.sin(k * Math.PI) * .12);
+    camState.look.lerp(_fl.copy(skater.position).add(_fp.set(0, -6, -6)), damp(dt, 5));
+    if (t >= .5) { INTRO.ph = 'fall'; INTRO.t = 0; INTRO.f0 = skater.position.clone(); fallSound(); return; }
+  }
+  if (INTRO.ph === 'fall') { // the dive: gravity-accelerated drop between the towers, arms spread, then a forward flip to land feet-first
+    const D = 2.5, u = clamp(t / D, 0, 1), f0 = INTRO.f0;
+    const h = 1 - Math.pow(1 - u, 1.6); skater.position.set(lerp(f0.x, LAND.x, h) + RGT.x * Math.sin(u * Math.PI) * 1.2, lerp(f0.y, 0, u * u), lerp(f0.z, LAND.z, h) + RGT.z * Math.sin(u * Math.PI) * 1.2);
+    const flip = clamp((u - .62) / .3, 0, 1); // dive at ~70° → forward flip (2π) → upright
+    skater.rotation.x = lerp(.55, 1.2, Math.min(1, u / .5)) * (1 - ease(flip)) + ease(flip) * Math.PI * 2 * (1 - Math.pow(1 - flip, 2)) * 0 + (flip > 0 ? ease(flip) * Math.PI * 2 : 0);
+    skater.rotation.z = Math.sin(u * 9) * .06 * (1 - flip);
+    RIG.armsUp = flip < 1 ? .9 - flip * .6 : .3; RIG.crouch = flip * .7;
+    if (R01() < dt * 14) { buttWorld(); GAS.emit(_bp.x, _bp.y, _bp.z, { vx: 0, vy: 6, vz: 0, life: .8, s0: .04, s1: .14, heat: 1, drag: 3 }); } // nervous toots stream up
+    _fp.copy(skater.position); // chase camera: above-behind, swinging low and to the side for the landing
+    const sideK = ease(clamp((u - .55) / .45, 0, 1));
+    camState.pos.copy(_fp).addScaledVector(FWD, -lerp(3.4, 2.6, sideK)).addScaledVector(RGT, lerp(1.1, 4.2, sideK)).y += lerp(2.8, 1.1, sideK);
+    camState.look.copy(_fp).addScaledVector(FWD, lerp(3, 0, sideK)).y -= lerp(2.6, -.4, sideK); camState.fov = lerp(55, 44, sideK); camState.ap = .2;
+    windGust(.4 + u * .8);
+    if (u >= 1) { INTRO.ph = 'land'; INTRO.t = 0; skater.rotation.set(0, FACE, 0); skater.position.copy(LAND); streetBoard.visible = false; boardG.visible = true; RIG.squish = 1; RIG.crouch = 1; landSound(); windGust(.1);
+      for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; GAS.emit(LAND.x + Math.cos(a) * .4, .1, LAND.z + Math.sin(a) * .4, { vx: Math.cos(a) * 3, vy: .4, vz: Math.sin(a) * 3, life: .9, s0: .05, s1: .22, heat: 0, drag: 3 }); } return; }
+  }
+  if (INTRO.ph === 'land') { // impact squash → recover → first proper fart
+    const k = clamp(t / .5, 0, 1); RIG.crouch = (1 - ease(k)) * 1; boardG.rotation.z = Math.sin(k * Math.PI) * -.08;
+    camState.pos.lerp(_fp.copy(LAND).addScaledVector(RGT, 4.4).addScaledVector(FWD, -2.8).setY(1.3), damp(dt, 4)); camState.look.lerp(_fl.set(LAND.x, .6, LAND.z), damp(dt, 6));
+    if (t > .55 && !INTRO.farted) { INTRO.farted = true; fartBurst(70, 2); sirenFar(); }
+    if (t > .8) post.comp.uniforms.uGas.value = clamp((t - .8) / .7, 0, 1);
+    if (t > 1.5) endIntro();
+  }
 }
 const GASOUT = { t: -1 };
 function endIntro() {
   if (!INTRO.on) return; INTRO.on = false; INTRO.ph = 'off'; $('ride').classList.remove('on');
   scene.add(skater); GAS.attach(scene); CLING.attach(scene); CLING.setFog(SKY.hor, 40, 130); CLING.uniforms.uAmb.value.setRGB(1, 1, 1); GAS.clear(); GAS.air.set(-SPEED, 0, 0); GAS.setFog(SKY.hor, 40, 130); GAS.uniforms.uAmb.value.setRGB(1, 1, 1);
-  skater.position.set(0, 0, LANE); skater.rotation.set(0, 0, 0); boardG.position.set(0, 0, 0); boardG.rotation.set(0, 0, 0); charG.position.set(0, DECK, 0); charG.rotation.y = 0;
-  RIG.crouch = RIG.armsUp = 0; RIG.headYaw = null; RIG.sniffIdle = 0;
+  skater.position.set(0, 0, LANE); skater.rotation.set(0, 0, 0, 'XYZ'); boardG.position.set(0, 0, 0); boardG.rotation.set(0, 0, 0); boardG.visible = true; charG.position.set(0, DECK, 0); charG.rotation.set(0, 0, 0);
+  RIG.crouch = RIG.armsUp = 0; RIG.headYaw = null; RIG.sniffIdle = 0; windStop();
   station = -1; lockUntil = 0; go(0, true); $('ui').classList.add('on'); startChaseAudio();
   post.comp.uniforms.uGlitch.value = 1; post.comp.uniforms.uGas.value = 1; GASOUT.t = 0;
 }
@@ -542,6 +623,15 @@ function fartSound(power = 1, dur = .6) {
   ng.gain.setValueAtTime(0, t0 + dur * .5); ng.gain.linearRampToValueAtTime(.18 * power, t0 + dur * .7); ng.gain.exponentialRampToValueAtTime(.001, t0 + dur + .25); s.connect(bp).connect(ng).connect(SND.out); s.start(t0, Math.random(), dur + .3);
 }
 const pfft = () => fartSound(.4, .18);
+// rooftop wind: brown-ish noise through a moving band-pass, with gusts
+function windStart() { const c = SND.ctx; if (!c || SND.wind) return; const n = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain(); n.buffer = noise(c); n.loop = true; f.type = 'bandpass'; f.frequency.value = 420; f.Q.value = .6; g.gain.value = 0; n.connect(f).connect(g).connect(SND.out); n.start(); SND.wind = { g, f }; }
+function windGust(level) { const c = SND.ctx; if (!c || !SND.wind) return; const t = c.currentTime; SND.wind.g.gain.setTargetAtTime(level * .45, t, .25); SND.wind.f.frequency.setTargetAtTime(300 + level * 900 + Math.sin(clock * .7) * 120, t, .3); }
+function windStop() { const c = SND.ctx; if (!c || !SND.wind) return; SND.wind.g.gain.setTargetAtTime(0, c.currentTime, .4); }
+function fallSound() { const c = out(); if (!c) return; const t0 = c.currentTime, s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain(); s.buffer = noise(c); s.loop = true; f.type = 'bandpass'; f.Q.value = .9; f.frequency.setValueAtTime(250, t0); f.frequency.exponentialRampToValueAtTime(2400, t0 + 2.4); g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(.5, t0 + 2.2); g.gain.exponentialRampToValueAtTime(.001, t0 + 2.6); s.connect(f).connect(g).connect(SND.out); s.start(t0); s.stop(t0 + 2.65); }
+function landSound() { const c = out(); if (!c) return; const t0 = c.currentTime, o = c.createOscillator(), g = c.createGain(); o.frequency.setValueAtTime(95, t0); o.frequency.exponentialRampToValueAtTime(38, t0 + .3); g.gain.setValueAtTime(.9, t0); g.gain.exponentialRampToValueAtTime(.001, t0 + .4); o.connect(g).connect(SND.out); o.start(t0); o.stop(t0 + .42); clack(1.2); setTimeout(() => clack(.5), 90); }
+// optional soundtrack: drop a track you have the rights to at assets/audio/music.mp3 — it starts on JUMP and loops
+const MUSIC = new Audio(); MUSIC.preload = 'auto'; MUSIC.loop = true; MUSIC.src = 'assets/audio/music.mp3'; MUSIC.addEventListener('error', () => { MUSIC.dataset.missing = '1'; });
+function startMusic() { const c = SND.ctx; if (!c || SND.music || MUSIC.dataset.missing) return; SND.music = true; const g = c.createGain(); g.gain.value = 0; c.createMediaElementSource(MUSIC).connect(g).connect(SND.out); MUSIC.play().then(() => g.gain.linearRampToValueAtTime(.5, c.currentTime + 1.2)).catch(() => {}); }
 function megaFart() { fartSound(2, 1.6); setTimeout(() => fartSound(1.4, .5), 1500); whoosh(1.4); }
 function sniffSound() { const c = out(); if (!c) return; for (let i = 0; i < 3; i++) { const t0 = c.currentTime + i * .17, s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain(); s.buffer = noise(c); f.type = 'highpass'; f.frequency.value = 2500; g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(.12, t0 + .05); g.gain.exponentialRampToValueAtTime(.001, t0 + .14); s.connect(f).connect(g).connect(SND.out); s.start(t0, Math.random(), .16); } }
 function clack(v = 1) { const c = out(); if (!c) return; const t0 = c.currentTime, s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain(); s.buffer = noise(c); f.type = 'bandpass'; f.frequency.value = 1800; f.Q.value = 2; g.gain.setValueAtTime(.5 * v, t0); g.gain.exponentialRampToValueAtTime(.001, t0 + .08); s.connect(f).connect(g).connect(SND.out); s.start(t0, Math.random(), .1); const o = c.createOscillator(), og = c.createGain(); o.frequency.setValueAtTime(160, t0); o.frequency.exponentialRampToValueAtTime(60, t0 + .1); og.gain.setValueAtTime(.4 * v, t0); og.gain.exponentialRampToValueAtTime(.001, t0 + .12); o.connect(og).connect(SND.out); o.start(t0); o.stop(t0 + .13); }
@@ -585,7 +675,7 @@ function tick(dt) {
   GAS.step(dt, clock); stepCling();
   updateCamera(dt);
   headTop.getWorldPosition(_hn); focus = lerp(focus, cam.position.distanceTo(_hn), damp(dt, 6));
-  post.render(INTRO.on ? alley : scene, cam, { focus, aperture: camState.ap ?? .4, bloom: 1, raw: RAW });
+  post.render(INTRO.on ? roof : scene, cam, { focus, aperture: camState.ap ?? .4, bloom: 1, raw: RAW });
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) { cancelAnimationFrame(raf); SND.ctx?.suspend(); } else { last = performance.now(); raf = requestAnimationFrame(frame); SND.ctx?.resume(); } });
 
@@ -596,7 +686,7 @@ setWord('LOADING');
 { const c = document.createElement('canvas'); c.width = c.height = 160; const x = c.getContext('2d'), d = x.createImageData(160, 160); for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; } x.putImageData(d, 0, 0); $('grain').style.background = `url(${c.toDataURL()})`; }
 const t0 = performance.now();
 Promise.all([sniffReady, boardReady, copReady, urbReady]).catch(e => { console.error(e); $('prog').textContent = 'a model failed to load'; }).then(() => {
-  try { R.compile(scene, cam); R.compile(alley, cam); } catch (e) { console.error(e); }
+  try { R.compile(scene, cam); R.compile(roof, cam); } catch (e) { console.error(e); }
   for (const k in prog) prog[k] = 1; showProg();
   setTimeout(() => { setWord('ENTER'); $('enter').disabled = false; $('enter').focus({ preventScroll: true }); if (Q.has('shot') || Q.has('intro')) begin(true); }, Q.has('shot') || Q.has('intro') ? 0 : Math.max(0, 1800 - (performance.now() - t0)));
 });
@@ -624,5 +714,5 @@ for (const [k, label] of [['x', 'X'], ['telegram', 'TG'], ['chart', 'Chart'], ['
 $('tick').textContent = SITE.ticker;
 if (SITE.ca) { const code = document.createElement('code'); code.textContent = SITE.ca; const b = document.createElement('button'); b.className = 'ca-copy'; b.type = 'button'; b.textContent = 'Copy'; b.onclick = async () => { try { await navigator.clipboard.writeText(SITE.ca); b.textContent = 'Copied'; } catch { b.textContent = 'Ctrl+C'; } setTimeout(() => { b.textContent = 'Copy'; }, 1500); }; $('ca').replaceChildren(code, b); }
 
-window.__sn = { RIG, THREE, R, scene, alley, cam, camState, BONES, skater, charG, boardG, cops, traffic, GAS, CLOUDS, GAL, INTRO, STATIONS, go, tick, fartBurst, post, get station() { return station; } };
+window.__sn = { RIG, THREE, R, scene, roof, cam, camState, BONES, skater, charG, boardG, cops, traffic, GAS, CLOUDS, GAL, INTRO, STATIONS, go, tick, fartBurst, post, get station() { return station; } };
 updateCamera(0); if (!Q.has('still')) raf = requestAnimationFrame(frame); // ?still: no loop (headless tests drive tick())
