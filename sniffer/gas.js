@@ -49,8 +49,8 @@ void main(){
   #include <colorspace_fragment>
 }`;
 
-export function createGas(scene, { max = 260, palette = {} } = {}) {
-  const geo = new THREE.IcosahedronGeometry(1, 3);
+export function createGas(scene, { max = 260, palette = {}, detail = 3, shadow = true } = {}) {
+  const geo = new THREE.IcosahedronGeometry(1, detail); // background banks use detail 2 (320 tris) instead of 3 (1280)
   const seedA = new THREE.InstancedBufferAttribute(new Float32Array(max), 1), ageA = new THREE.InstancedBufferAttribute(new Float32Array(max), 1), heatA = new THREE.InstancedBufferAttribute(new Float32Array(max), 1);
   for (const a of [seedA, ageA, heatA]) a.setUsage(THREE.DynamicDrawUsage);
   geo.setAttribute('iSeed', seedA); geo.setAttribute('iAge', ageA); geo.setAttribute('iHeat', heatA);
@@ -65,7 +65,7 @@ export function createGas(scene, { max = 260, palette = {} } = {}) {
   const line = new THREE.ShaderMaterial({ uniforms, vertexShader: VERT(true), fragmentShader: FRAG(true), side: THREE.BackSide });
   const mesh = new THREE.InstancedMesh(geo, mat, max), hull = new THREE.InstancedMesh(geo, line, max);
   for (const m of [mesh, hull]) { m.frustumCulled = false; m.count = 0; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(m); }
-  mesh.castShadow = true;
+  mesh.castShadow = shadow;
   const P = [], _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3(), _e = new THREE.Euler();
   const api = {
     mesh, hull, P, uniforms, air: new THREE.Vector3(),
@@ -98,7 +98,7 @@ export function createGas(scene, { max = 260, palette = {} } = {}) {
         _m.compose(_p.set(p.x, p.y, p.z), _q.setFromEuler(_e.set(p.rx, p.ry, 0)), _s.set(s, s * p.squash, s));
         mesh.setMatrixAt(i, _m); hull.setMatrixAt(i, _m); seedA.setX(i, p.seed); ageA.setX(i, u); heatA.setX(i, p.heat);
       }
-      mesh.count = hull.count = n;
+      mesh.count = hull.count = Math.ceil(n * (api.capFrac ?? 1)); // quality tiers can draw fewer puffs
       mesh.instanceMatrix.needsUpdate = hull.instanceMatrix.needsUpdate = seedA.needsUpdate = ageA.needsUpdate = heatA.needsUpdate = true;
     },
     setFog(color, near, far) { uniforms.uFogC.value.copy(color); uniforms.uFogN.value = near; uniforms.uFogF.value = far; },

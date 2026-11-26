@@ -1,12 +1,12 @@
 // Retro post pipeline, matched to the HOSS look (itshoss.fun), written from scratch:
-//   low internal resolution (~520 lines, upscaled with image-rendering: pixelated)
+//   near-native internal resolution, scaled per quality tier (high / med / low), smooth upscale
 //   → depth-of-field gather (golden-angle disc, depth-aware, bright pixels weighted = bokeh)
 //   → bloom (bright pass → quarter-res separable blur ×4)
 //   → composite: chromatic aberration, bloom, warm anamorphic streaks, 55/45 luminance-preserving/ACES tone map,
 //     slight desaturation + contrast, cool shadows, vignette, plus effect modes (CRT glitch, speed zoom, gas wipe).
 import * as THREE from 'three';
 
-export function createPost(R, { mobile = false, lines = 520, maxPixels = 2.4e6 } = {}) {
+export function createPost(R, { mobile = false, lines = 1080, maxPixels = 2.4e6 } = {}) {
   const opt = { type: THREE.HalfFloatType, colorSpace: THREE.LinearSRGBColorSpace };
   const rt = new THREE.WebGLRenderTarget(4, 4, opt);
   rt.depthTexture = new THREE.DepthTexture(4, 4); rt.depthTexture.type = THREE.UnsignedIntType;
@@ -14,9 +14,7 @@ export function createPost(R, { mobile = false, lines = 520, maxPixels = 2.4e6 }
   const QV = 'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}';
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2)); quad.frustumCulled = false;
   const pScene = new THREE.Scene(); pScene.add(quad); const pCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  const TAPS = mobile ? 24 : 48;
-
-  const dof = new THREE.ShaderMaterial({
+  const mkDof = (TAPS) => new THREE.ShaderMaterial({
     depthTest: false, depthWrite: false, vertexShader: QV,
     uniforms: { tC: { value: rt.texture }, tZ: { value: rt.depthTexture }, uNear: { value: .1 }, uFar: { value: 400 }, uPx: { value: new THREE.Vector2() },
       uFocus: { value: 3 }, uRange: { value: .25 }, uAp: { value: .5 }, uMax: { value: 10 } },
@@ -35,6 +33,7 @@ export function createPost(R, { mobile = false, lines = 520, maxPixels = 2.4e6 }
           acc+=s*w;wsum+=w;}
         gl_FragColor=vec4(wsum>0.?acc/wsum:base,1.);}`,
   });
+  const DOF = { hi: mkDof(mobile ? 24 : 40), lo: mkDof(14) }; let dof = DOF.hi;
   const bright = new THREE.ShaderMaterial({
     depthTest: false, depthWrite: false, vertexShader: QV, uniforms: { tD: { value: rtD.texture }, uThr: { value: .85 } },
     fragmentShader: 'uniform sampler2D tD;uniform float uThr;varying vec2 vUv;void main(){vec3 c=texture2D(tD,vUv).rgb;float l=dot(c,vec3(.2126,.7152,.0722));gl_FragColor=vec4(c*smoothstep(uThr,uThr+1.3,l)+c*.04,1.);}',
@@ -87,26 +86,33 @@ export function createPost(R, { mobile = false, lines = 520, maxPixels = 2.4e6 }
       }`,
   });
 
-  let pr = 1;
+  let pr = 1, lastW = 1, lastH = 1;
+  // quality tiers: internal resolution, DoF taps (or off), bloom passes
+  const TIERS = { high: { lines, dof: 'hi', blur: 4 }, med: { lines: Math.round(lines * .78), dof: 'lo', blur: 2 }, low: { lines: Math.round(lines * .58), dof: null, blur: 2 } };
+  let tier = TIERS.high;
+  function setQuality(name) { tier = TIERS[name] || TIERS.high; if (tier.dof) dof = DOF[tier.dof]; for (const m of Object.values(DOF)) m.uniforms.uPx.value.copy(DOF.hi.uniforms.uPx.value); resize(lastW, lastH); }
   function resize(w, h) {
-    pr = Math.min(devicePixelRatio, lines / Math.min(w, h), Math.sqrt(maxPixels / (w * h)));
+    lastW = w; lastH = h;
+    pr = Math.min(devicePixelRatio, tier.lines / Math.min(w, h), Math.sqrt(maxPixels / (w * h)));
     R.setPixelRatio(pr); R.setSize(w, h, false);
     const W = Math.max(4, Math.floor(w * pr)), H = Math.max(4, Math.floor(h * pr));
     rt.setSize(W, H); rtD.setSize(W, H); bA.setSize(W >> 2, H >> 2); bB.setSize(W >> 2, H >> 2);
-    dof.uniforms.uPx.value.set(1 / W, 1 / H); comp.uniforms.uPx.value.set(1 / W, 1 / H); dof.uniforms.uMax.value = 12 * pr / 1.5;
+    for (const m of Object.values(DOF)) { m.uniforms.uPx.value.set(1 / W, 1 / H); m.uniforms.uMax.value = 12 * Math.min(W, H) / 780; } comp.uniforms.uPx.value.set(1 / W, 1 / H);
   }
   function render(scene, cam, { focus = 3, aperture = .5, bloom = 1, raw = false } = {}) {
     if (raw) { R.setRenderTarget(null); R.render(scene, cam); return; }
     R.setRenderTarget(rt); R.render(scene, cam);
     const u = dof.uniforms; u.uNear.value = cam.near; u.uFar.value = cam.far; u.uFocus.value = focus; u.uAp.value = aperture;
     comp.uniforms.uBloom.value = .45 * bloom;
-    quad.material = dof; R.setRenderTarget(rtD); R.render(pScene, pCam);
+    const src = tier.dof ? rtD : rt;
+    if (tier.dof) { quad.material = dof; R.setRenderTarget(rtD); R.render(pScene, pCam); }
+    bright.uniforms.tD.value = src.texture; comp.uniforms.tD.value = src.texture;
     quad.material = bright; R.setRenderTarget(bA); R.render(pScene, pCam);
     const w = bA.width, h = bA.height;
-    for (const [x, y, src, dst] of [[1.2, 0, bA, bB], [0, 1.2, bB, bA], [2.6, 0, bA, bB], [0, 2.6, bB, bA]]) {
+    for (const [x, y, src, dst] of [[1.2, 0, bA, bB], [0, 1.2, bB, bA], [2.6, 0, bA, bB], [0, 2.6, bB, bA]].slice(0, tier.blur)) {
       blur.uniforms.tD.value = src.texture; blur.uniforms.uDir.value.set(x / w, y / h); quad.material = blur; R.setRenderTarget(dst); R.render(pScene, pCam);
     }
     quad.material = comp; R.setRenderTarget(null); R.render(pScene, pCam);
   }
-  return { resize, render, comp, dof, get pixelRatio() { return pr; } };
+  return { resize, render, comp, setQuality, get dof() { return dof; }, get pixelRatio() { return pr; } };
 }

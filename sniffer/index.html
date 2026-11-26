@@ -17,7 +17,7 @@
   --f-d:'Bungee',Impact,'Arial Black',sans-serif;--f-p:'Press Start 2P',monospace;--f-v:'VT323',monospace}
 *{box-sizing:border-box;margin:0}
 html,body{height:100%;background:var(--bg);color:var(--ink);overflow:hidden;font-family:var(--f-v);-webkit-font-smoothing:antialiased}
-canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;image-rendering:pixelated}
+canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;image-rendering:auto}
 
 /* film grain, jumping in steps */
 .grain{position:fixed;inset:-50%;z-index:6;pointer-events:none;opacity:.08;mix-blend-mode:overlay;animation:grain 1s steps(6) infinite}

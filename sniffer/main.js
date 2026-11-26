@@ -34,7 +34,7 @@ const R01 = Math.random;
 /* ================================================================== renderer, sky, fog */
 const cvs = $('gl');
 const R = new THREE.WebGLRenderer({ canvas: cvs, antialias: RAW, powerPreference: 'high-performance', preserveDrawingBuffer: Q.has('shot') || Q.has('intro') });
-R.outputColorSpace = THREE.SRGBColorSpace; R.shadowMap.enabled = true; R.shadowMap.type = THREE.PCFSoftShadowMap;
+R.outputColorSpace = THREE.SRGBColorSpace; R.shadowMap.enabled = true; R.shadowMap.type = THREE.PCFShadowMap;
 const post = createPost(R, { mobile: MOBILE });
 const scene = new THREE.Scene();
 const SUN = V3(.86, .12, -.5).normalize();
@@ -55,7 +55,7 @@ scene.add(new THREE.HemisphereLight(0xffd0a0, 0x3e5a2c, .35)); // gas-green boun
 const rimL = new THREE.DirectionalLight(0xffcf8a, 2.2); rimL.position.set(-30, 9, -22); scene.add(rimL); // golden backlight: rims him and the cops against the sky
 const sunL = new THREE.DirectionalLight(0xffb98a, 3.0);
 sunL.position.set(26, 20, -14); sunL.castShadow = true;
-sunL.shadow.mapSize.set(MOBILE ? 1024 : 2048, MOBILE ? 1024 : 2048);
+sunL.shadow.mapSize.set(MOBILE ? 1024 : 1536, MOBILE ? 1024 : 1536);
 Object.assign(sunL.shadow.camera, { left: -14, right: 14, top: 10, bottom: -10, near: 1, far: 80 });
 sunL.shadow.bias = -.0005; sunL.shadow.normalBias = .03; scene.add(sunL, sunL.target);
 const fill = new THREE.DirectionalLight(0xc8b8ff, .6); fill.position.set(-10, 6, 14); scene.add(fill);
@@ -197,8 +197,8 @@ const load = (url, key) => new Promise((res, rej) => loader.load(url, g => { pro
 document.fonts.ready.then(() => { prog.font = 1; showProg(); });
 function retro(root, { shadows = true } = {}) { // nearest-filtered textures everywhere (the PS2 look) + shadows
   root.traverse(o => {
-    if (!o.isMesh) return; o.castShadow = shadows && !(o.material && o.material.transparent); o.receiveShadow = true; o.frustumCulled = false;
-    for (const m of [].concat(o.material)) for (const k of ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap']) if (m[k]) { m[k].magFilter = THREE.NearestFilter; m[k].minFilter = THREE.NearestMipmapLinearFilter; m[k].needsUpdate = true; }
+    if (!o.isMesh) return; o.castShadow = shadows && !(o.material && o.material.transparent); o.receiveShadow = true; o.frustumCulled = !o.isSkinnedMesh; // cull cars and props off screen; skinned meshes keep their bind-pose bounds so stay on
+    for (const m of [].concat(o.material)) for (const k of ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap']) if (m[k]) { m[k].magFilter = THREE.LinearFilter; m[k].minFilter = THREE.LinearMipmapLinearFilter; m[k].anisotropy = 4; m[k].needsUpdate = true; }
   });
 }
 const SPIN = []; // [node, rest quaternion, axle (parent space), radius, owner with userData.d]
@@ -271,7 +271,7 @@ GAS.air.set(-SPEED, 0, 0); GAS.setFog(SKY.hor, 40, 130);
 const _bp = V3(), _bd = V3(), _cq = new THREE.Quaternion();
 function buttWorld() { butt.getWorldPosition(_bp); _bd.set(0, 0, -1).applyQuaternion(charG.getWorldQuaternion(_cq)); return _bp; }
 // the whole city is gassed: banks of his green cloud sit in the street, roll along the sidewalks and hang between the buildings, scrolling with the world
-const SMOG = createGas(scene, { max: MOBILE ? 150 : 240, palette: { lit: 0xd8eaa8, mid: 0xaac47c, shade: 0x7e9c58, deep: 0x56703c, line: 0x2a3c1c } }); SMOG.uniforms.uOutline.value = .05; SMOG.setFog(SKY.hor, 30, 120);
+const SMOG = createGas(scene, { max: MOBILE ? 150 : 240, detail: 2, shadow: false, palette: { lit: 0xd8eaa8, mid: 0xaac47c, shade: 0x7e9c58, deep: 0x56703c, line: 0x2a3c1c } }); SMOG.uniforms.uOutline.value = .05; SMOG.setFog(SKY.hor, 30, 120);
 { let sd = 911; const r = () => (sd = (sd * 16807) % 2147483647) / 2147483647; const n = MOBILE ? 150 : 240;
   for (let i = 0; i < n; i++) { const band = r(); let z, y, sz;
     if (band < .3) { z = (r() < .5 ? -1 : 1) * (8 + r() * 4); y = .2 + r() * 1.2; sz = .9 + r() * 1.4; }        // rolling along the sidewalks
@@ -292,6 +292,7 @@ function stepCling() { // follow his butt every frame, breathing gently
 function fartBurst(n = 30, power = 1) { buttWorld(); GAS.burst(_bp, _bd, n, power); RIG.squish = 1; fartSound(power, .35 + power * .35 + R01() * .3); }
 
 /* ================================================================== the rider: procedural pose on the skeleton */
+const RIDE_YAW = .6; // riding: his body turns toward where he's going (+X), the head does the rest
 const ABT = { t: -1, dir: 1, y0: 0, y1: 0, arm: 'L', YAW: 1.0 }; // About trick: pop → 360 shove-it + body varial to face camera → land → wave
 const RIG = { squish: 0, lean: 0, crouch: 0, armsUp: 0, sniff: -1, headYaw: null, ollie: -1, nextOllie: 5, nextFart: 2.5, lastZ: LANE, lastVz: 0, trail: 0, tip: { x: 0, v: 0, py: 0, pv: 0 } };
 const HOVER = { k: 0, was: false };
@@ -315,7 +316,7 @@ function poseRider(dt, mode) {
   charG.position.y = (mode !== 'alley' || INTRO.ph === 'land') ? DECK + Math.sin(t * 9) * .004 * b : 0; // on the ledge he stands on concrete, not the deck
   charG.updateMatrixWorld(true);
   const X = charAxis(1, 0, 0), Y = charAxis(0, 1, 0), Z = charAxis(0, 0, 1);
-  let yaw = mode === 'alley' ? (RIG.headYaw ?? 0) : lerp(.32, -.1, clamp(RIG.bodyYaw || 0, 0, 1)), pitch = 0;
+  let yaw = mode === 'alley' ? (RIG.headYaw ?? 0) : station === ST_ABOUT ? -.1 : .45, pitch = mode === 'street' && station !== ST_ABOUT ? -.08 : 0; // riding: eyes on the road ahead
   if (mode !== 'alley' && ptr.seen) { yaw += ptr.cx * .22; pitch += ptr.cy * .08; }
   yaw = clamp(yaw, -.45, .45);
   yaw = lerp(yaw, 0, HOVER.k);
@@ -349,7 +350,7 @@ function stepStreet(dt) {
     skater.position.y = .55 * 4 * u * (1 - u); boardG.rotation.z = u < .3 ? Math.sin(u / .3 * Math.PI) * .4 : 0; RIG.armsUp = Math.sin(u * Math.PI) * .5; RIG.crouch = u < .15 ? 1 - u / .15 : 0;
     if (u >= 1) { RIG.ollie = -1; skater.position.y = 0; boardG.rotation.z = 0; RIG.armsUp = 0; clack(1); RIG.squish = .6; RIG.stv = -5; }
   } else skater.position.y = Math.abs(Math.sin(t * 13)) * .006 * b;
-  stepAboutTrick(dt);
+  stepAboutTrick(dt); if (ABT.t < 0) RIG.bodyYaw = lerp(RIG.bodyYaw ?? RIDE_YAW, station === ST_ABOUT ? ABT.YAW : RIDE_YAW, damp(dt, 3));
   skater.userData.d = dist;
   if (!GAL.sky) { RIG.trail += dt * (MOBILE ? 18 : 30); buttWorld(); for (; RIG.trail >= 1; RIG.trail--) { const k = R01(); GAS.emit(_bp.x + (R01() - .5) * .12, _bp.y + (R01() - .5) * .14, _bp.z + (R01() - .5) * .1, { vx: -R01() * 6, vy: .05 + R01() * .45, vz: _bd.z * (.4 + R01()) + (R01() - .5) * 1.2, life: .7 + R01() * .9, s0: .03, s1: .06 + k * k * .26, heat: .5 + R01() * .4 }); } }
   RIG.nextFart -= dt;
@@ -389,7 +390,7 @@ function stepAboutTrick(dt) {
   if (ABT.dir > 0) RIG.wave = clamp((t - .95) / .2, 0, 1) * clamp((2.9 - t) / .3, 0, 1); // hello!
   if (t > 3) { ABT.t = -1; RIG.wave = 0; }
 }
-function aboutTrick(dir) { ABT.t = 0; ABT.dir = dir; ABT.y0 = RIG.bodyYaw || 0; ABT.y1 = dir > 0 ? ABT.YAW : 0; RIG.wave = 0; }
+function aboutTrick(dir) { ABT.t = 0; ABT.dir = dir; ABT.y0 = RIG.bodyYaw || 0; ABT.y1 = dir > 0 ? ABT.YAW : RIDE_YAW; RIG.wave = 0; }
 
 /* ================================================================== camera stations */
 const STATIONS = [
@@ -406,7 +407,7 @@ function go(i, instant = REDUCED) {
   i = clamp(i, 0, STATIONS.length - 1); if (i === station && !instant) return;
   const now = performance.now(); if (now < lockUntil) return; lockUntil = now + 900;
   const prev = station; station = i; const S = STATIONS[i];
-  if (i === ST_ABOUT) { if (!instant && !REDUCED) { aboutTrick(1); setTimeout(() => { if (station === ST_ABOUT) { clack(1.5); whoosh(.3); post.comp.uniforms.uGlitch.value = Math.max(post.comp.uniforms.uGlitch.value, .3); } }, 1400); } else RIG.bodyYaw = ABT.YAW; } else if (prev === ST_ABOUT && (RIG.bodyYaw || ABT.t >= 0)) { if (instant || REDUCED) { ABT.t = -1; RIG.bodyYaw = 0; RIG.wave = 0; boardG.rotation.y = 0; } else aboutTrick(-1); }
+  if (i === ST_ABOUT) { if (!instant && !REDUCED) { aboutTrick(1); setTimeout(() => { if (station === ST_ABOUT) { clack(1.5); whoosh(.3); post.comp.uniforms.uGlitch.value = Math.max(post.comp.uniforms.uGlitch.value, .3); } }, 1400); } else RIG.bodyYaw = ABT.YAW; } else if (prev === ST_ABOUT && (RIG.bodyYaw || ABT.t >= 0)) { if (instant || REDUCED) { ABT.t = -1; RIG.bodyYaw = RIDE_YAW; RIG.wave = 0; boardG.rotation.y = 0; } else aboutTrick(-1); }
   document.querySelectorAll('nav .btn').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.s === i))); $('live').textContent = S.name;
   const ab = $('about'), on = i === ST_ABOUT; ab.classList.toggle('on', on); ab.setAttribute('aria-hidden', String(!on)); ab.toggleAttribute('inert', !on);
   if (GAL.on && i !== ST_MEMES) { endGallery(); instant = true; }
@@ -429,7 +430,7 @@ function stepTravel(dt) {
 /* ================================================================== MEMES: mega fart → launch → sky with toon clouds → card carousel */
 const GAL = { on: false, t: 0, sky: false, idx: 0, side: 0, yaw: 0, yaw0: 0, slide: 1, ui: 0, hov: 0, fly: 0 };
 const STREET = [road, ground, curbs, ...walks, ...tiles, heli, beam, spot, SMOG.mesh, SMOG.hull];
-const CLOUDS = createGas(scene, { max: 220, palette: { lit: 0xfff6fb, mid: 0xf6d6ea, shade: 0xc9a6d6, deep: 0x9a7ab8, line: 0x5a4380 } });
+const CLOUDS = createGas(scene, { max: 220, detail: 2, shadow: false, palette: { lit: 0xfff6fb, mid: 0xf6d6ea, shade: 0xc9a6d6, deep: 0x9a7ab8, line: 0x5a4380 } });
 CLOUDS.mesh.visible = CLOUDS.hull.visible = false; CLOUDS.uniforms.uOutline.value = .035; CLOUDS.setFog(SKY_G.hor, 110, 320); CLOUDS.uniforms.uL.value.set(-.5, .8, .4);
 { seed = 909; for (let i = 0; i < 34; i++) {
   const side = rnd() < .5 ? -1 : 1, z = side * (6 + Math.pow(rnd(), .7) * 50); let y = -14 + rnd() * 24; if (Math.abs(z) < 14 && y > -5 && y < 6) y = rnd() < .5 ? -5 - rnd() * 6 : 6 + rnd() * 5;
@@ -519,7 +520,7 @@ const RMAT = {
 };
 // the reference painting: sunlit ochre and sandstone on the west side, deep maroon / plum / umber in shadow, the far city in inked grey-white
 const WARM = [0xe0a24e, 0xd99a58, 0xeab46a, 0xc98a4e, 0xd8b07a, 0xb8804a], COOL = [0x6a3440, 0x4e2c40, 0x7a4a3e, 0x5a3a52, 0x3e2a3a, 0x8a5a48],
-  DARK = [0x4a2232, 0x3a2234, 0x5a2e30, 0x2e2236, 0x6a3a36, 0x3a2a2e], GREY = [0xf2f2f0, 0xdcdcda, 0xc4c4c2, 0xa8a8a6, 0x8e8e8e, 0xeaeae8, 0x767676];
+  DARK = [0x5e2c3c, 0x4e2e44, 0x6a3836, 0x463048, 0x7a4640, 0x523440], GREY = [0xf2f2f0, 0xdcdcda, 0xc4c4c2, 0xa8a8a6, 0x8e8e8e, 0xeaeae8, 0x767676];
 const TRIM = [0xf0e0c0, 0x2a1c1c, 0xd8c8a8, 0x3a2420];
 const NEON = [0xffb24a, 0xffd27a, 0xff8a3a];
 let roofSeed = 4040; const rr = () => (roofSeed = (roofSeed * 16807) % 2147483647) / 2147483647;
@@ -528,6 +529,7 @@ function inkBox(x, y, z, w, h, d) { // ink outline of a box (the sketchy line wo
   const g = new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)); const p = g.attributes.position.array;
   for (let i = 0; i < p.length; i += 3) inkPos.push(p[i] + x, p[i + 1] + y, p[i + 2] + z);
 }
+const roofOf = (c) => new THREE.Color(c).lerp(new THREE.Color(0xe8d6b8), .45).getHex(); // roofs catch the sky: a lighter, warmer cap
 function tower(B, x, z, w, d, h, far) {
   const lit = x < 0 ? .75 : .4; // sun from the left: west towers glow warm, east ones sit in deep jewel-tone shade
   const col = far ? GREY[rr() * GREY.length | 0] : rr() < lit ? (rr() < .7 ? WARM : COOL)[rr() * 6 | 0] : DARK[rr() * DARK.length | 0];
@@ -537,12 +539,13 @@ function tower(B, x, z, w, d, h, far) {
     const th = t === tiers - 1 ? h - y : h * (.5 + rr() * .2) - y; if (th <= 2) break;
     if (round) { const r = Math.min(cw, cd) / 2, g = new THREE.CylinderGeometry(r, r, th, 14, 1), uv = g.attributes.uv;
       for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * Math.PI * r * 2 / 8, uv.getY(k) * th / 12);
-      B.add(g, RMAT.bld, col, T(x, y + th / 2, z)); if (!far) B.add(new THREE.CylinderGeometry(r + .5, r + .5, .9, 14), RMAT.flat, trim, T(x, y + th - .45, z)); }
+      B.add(g, RMAT.bld, col, T(x, y + th / 2, z)); B.add(new THREE.CylinderGeometry(r - .3, r - .3, .3, 14), RMAT.flat, roofOf(col), T(x, y + th + .15, z)); if (!far) B.add(new THREE.CylinderGeometry(r + .5, r + .5, .9, 14), RMAT.flat, trim, T(x, y + th - .51, z)); }
     else {
       const g = box(cw, th, cd), uv = g.attributes.uv, S = [[cd, th], [cd, th], [0, 0], [0, 0], [cw, th], [cw, th]];
       for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const j = f * 4 + v; uv.setXY(j, S[f][0] ? uv.getX(j) * S[f][0] / 8 : 0, S[f][1] ? uv.getY(j) * S[f][1] / 12 : 0); }
       B.add(g, RMAT.bld, col, T(x, y + th / 2, z)); if (far || rr() < .35) inkBox(x, y + th / 2, z, cw, th, cd);
-      if (!far) { B.add(box(cw + .9, 1, cd + .9), RMAT.flat, trim, T(x, y + th - .5, z)); if (th > 30 && rr() < .6) B.add(box(cw + .5, .6, cd + .5), RMAT.flat, trim, T(x, y + th * .5, z)); }
+      B.add(box(cw - .5, .3, cd - .5), RMAT.flat, roofOf(col), T(x, y + th + .15, z)); // its own lit roof cap (no coplanar faces, never reads black)
+      if (!far) { B.add(box(cw + .9, .9, cd + .9), RMAT.flat, trim, T(x, y + th - .51, z)); if (th > 30 && rr() < .6) B.add(box(cw + .5, .6, cd + .5), RMAT.flat, trim, T(x, y + th * .5, z)); }
     }
     if (!far && t === 0 && rr() < .12) { // the odd warm-lit sign facing the canyon
       const sx = x - Math.sign(x) * (cw / 2 + .35), sy = 18 + rr() * Math.min(60, th - 24), nc = NEON[rr() * NEON.length | 0];
@@ -606,7 +609,7 @@ const roofSun = new THREE.DirectionalLight(0xffd49a, 3.2); roofSun.position.set(
 const roofKey = new THREE.DirectionalLight(0xfff0dc, 1.4); roofKey.position.set(-6, 150, 8); roofKey.target.position.set(0, ROOF_Y, 0); roofKey.castShadow = true;
 Object.assign(roofKey.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 1, far: 30 }); roofKey.shadow.mapSize.set(1024, 1024); roof.add(roofKey, roofKey.target);
 // the city is gassed: his green clouds hang in the canyon at every height (the painting's puffs, in Sniffer's colour)
-const RCLOUD = createGas(roof, { max: 340, palette: { lit: 0xe2f0b8, mid: 0xb8d088, shade: 0x86a85e, deep: 0x5a7a40, line: 0x2e4420 } });
+const RCLOUD = createGas(roof, { max: 340, detail: 2, shadow: false, palette: { lit: 0xe2f0b8, mid: 0xb8d088, shade: 0x86a85e, deep: 0x5a7a40, line: 0x2e4420 } });
 RCLOUD.uniforms.uOutline.value = .03; RCLOUD.setFog(HAZE, 260, 900); RCLOUD.uniforms.uL.value.set(-.6, .7, .2);
 { roofSeed = 77; const clus = [[-14, 118, -26, 7], [16, 106, -40, 8], [-26, 80, -70, 10], [24, 70, -95, 11], [-8, 124, -14, 5], [-40, 120, -150, 14], [40, 100, -180, 15], [0, 60, -130, 12],
     [-12, 40, -60, 12], [14, 20, -90, 14], [-6, 12, -170, 16], [10, 30, -240, 18], [-30, 50, -300, 22], [28, 34, -360, 22], [0, 90, -260, 18], [-18, 150, -90, 9], [22, 140, -130, 11],
@@ -788,7 +791,22 @@ function hoverOn() { if (!started || !ptr.seen || travel || GAL.on || INTRO.on) 
 function resize() { post.resize(innerWidth, innerHeight); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 let focus = 4, last = performance.now(), raf = 0;
-function frame(now) { raf = requestAnimationFrame(frame); let dt = Math.min(.05, (now - last) / 1000); last = now; if (HOLD && started) dt = 0; tick(dt); }
+// ---- quality: pick a tier from the hardware, then step down live if the frame rate can't keep up (weak laptops, old phones)
+const QUAL = { order: ['high', 'med', 'low'], i: 0, acc: 0, n: 0, cool: 3 };
+{ const forced = Q.get('q'), cores = navigator.hardwareConcurrency || 4, mem = navigator.deviceMemory || 8;
+  QUAL.i = forced ? Math.max(0, QUAL.order.indexOf(forced)) : MOBILE || cores <= 4 || mem <= 4 ? 1 : 0; applyQuality(); }
+function applyQuality() {
+  const q = QUAL.order[QUAL.i]; post.setQuality(q);
+  const sh = q !== 'low'; sunL.castShadow = sh; roofKey.castShadow = sh;
+  const f = q === 'low' ? .5 : q === 'med' ? .75 : 1; for (const G of [SMOG, RCLOUD, CLOUDS, GAS]) G.capFrac = f;
+  document.documentElement.dataset.q = q;
+}
+function watchFrameRate(dt) { // average 1.5 s windows; under ~42 fps → one tier down (never back up, to avoid see-sawing)
+  if (!started && !INTRO.on) return; if (QUAL.cool > 0) { QUAL.cool -= dt; return; }
+  QUAL.acc += dt; QUAL.n++; if (QUAL.acc < 1.5) return; const avg = QUAL.acc / QUAL.n; QUAL.acc = QUAL.n = 0;
+  if (avg > 1 / 42 && QUAL.i < QUAL.order.length - 1) { QUAL.i++; applyQuality(); QUAL.cool = 2; }
+}
+function frame(now) { raf = requestAnimationFrame(frame); let dt = Math.min(.05, (now - last) / 1000); last = now; if (HOLD && started) dt = 0; if (!Q.has('q')) watchFrameRate(dt); tick(dt); }
 function tick(dt) {
   clock += dt; sky.material.uniforms.uT.value = clock;
   const cu = post.comp.uniforms; if (cu.uGlitch.value > 0) cu.uGlitch.value = Math.max(0, cu.uGlitch.value - dt * .8); cu.uT.value = clock;
