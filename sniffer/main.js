@@ -190,7 +190,9 @@ const tiles = Array.from({ length: NT }, (_, i) => buildTile(i));
 /* ================================================================== loading the models */
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const prog = { sn: 0, bd: 0, cop: 0, urb: 0, font: 0 };
-const showProg = () => { const p = Math.round((prog.sn * 35 + prog.bd * 5 + prog.cop * 20 + prog.urb * 25 + prog.font * 15)); $('prog').textContent = p < 100 ? `loading ${p}%` : 'ready'; $('bar').style.width = p + '%'; };
+const showProg = () => { const p = Math.round((prog.sn * 35 + prog.bd * 5 + prog.cop * 20 + prog.urb * 25 + prog.font * 15)); $('prog').textContent = p + '%'; $('bar').style.width = p + '%'; dispatchLog(p); };
+const LOG = [[0, '> PATCHING INTO CITY CCTV...'], [12, '> ODOR SPIKE DETECTED: SECTOR 7'], [30, '> SUSPECT ID: SNIFFER (HOOD, GAS MASK)'], [50, '> VEHICLE: SKATEBOARD. VERY FAST.'], [70, '> UNITS DISPATCHED: 2 CRUISERS, 1 CHOPPER'], [100, '! WARNING: DO NOT INHALE', 'warn']];
+let logN = 0; function dispatchLog(p) { const ol = $('log'); while (logN < LOG.length && p >= LOG[logN][0]) { const li = document.createElement('li'); li.textContent = LOG[logN][1]; if (LOG[logN][2]) li.className = LOG[logN][2]; ol.append(li); while (ol.children.length > 5) ol.firstChild.remove(); logN++; } }
 const load = (url, key) => new Promise((res, rej) => loader.load(url, g => { prog[key] = 1; showProg(); res(g); }, e => { if (e.total) { prog[key] = e.loaded / e.total * .95; showProg(); } }, rej));
 document.fonts.ready.then(() => { prog.font = 1; showProg(); });
 function retro(root, { shadows = true } = {}) { // nearest-filtered textures everywhere (the PS2 look) + shadows
@@ -297,7 +299,7 @@ function poseRider(dt, mode) {
   // squash & stretch on an underdamped spring (overshoots like a rubber toy); volume-preserving: thin when tall, fat when squashed
   RIG.st ??= 0; RIG.stv ??= 0; RIG.stT ??= 0;
   for (let i = 0; i < 3; i++) { const h = dt / 3; RIG.stv += (-170 * (RIG.st - RIG.stT) - 11 * RIG.stv) * h; RIG.st += RIG.stv * h; }
-  const st = clamp(RIG.st, -.45, .5), w = 1 / Math.sqrt(1 + st);
+  const st = clamp(RIG.st, -.22, .2), w = 1 / Math.sqrt(1 + st);
   charG.scale.set(CS * (1 + sq * .5) * w, CS * (1 + st - sq - RIG.crouch * .08), CS * (1 + sq * .5) * w);
   charG.rotation.x = RIG.lean * .3 + RIG.crouch * .1 - .04 + Math.sin(t * 2.2) * .012 * b; // lean the whole toy, not the robe
   charG.rotation.y = RIG.bodyYaw || 0; // About: body varial to face the camera
@@ -319,7 +321,7 @@ function poseRider(dt, mode) {
   const wv = RIG.wave || 0, wa = wv * (.95 + Math.sin(t * 15) * .28); // hello wave on the camera-side arm
   rotW(BONES.arm_L, Z, up + fl + RIG.lean * .15 + (ABT.arm === 'L' ? wa : 0)); rotW(BONES.arm_R, Z, -(up - fl - RIG.lean * .15) - (ABT.arm === 'R' ? wa : 0));
   const pump = RIG.sniff >= 0 ? Math.max(0, Math.sin(RIG.sniff * 18)) : (RIG.sniffIdle || 0);
-  if (BONES.snout) BONES.snout.scale.set(1 + pump * .07, 1 + pump * .05, 1 + pump * .07); // filter breathes: an even swell of the whole tube
+  if (BONES.snout) BONES.snout.scale.set(1 + pump * .035, 1 + pump * .025, 1 + pump * .035); // filter breathes: an even swell of the whole tube
 }
 
 /* ================================================================== the ride */
@@ -565,6 +567,7 @@ function tower(B, x, z, w, d, h, far) {
     const h = near ? 50 + rr() * 70 : far ? 90 + rr() * rr() * 260 : 60 + rr() * 110;
     tower(far ? F : B, x, z, w, d, h, far);
   }
+  for (let i = 0; i < 46; i++) { const a = rr() * Math.PI * 2, r = 60 + rr() * 260; const x = Math.cos(a) * r, z = 40 + Math.abs(Math.sin(a)) * r; if (Math.abs(x) < 22 && z < 60) continue; tower(r < 140 ? B : F, x, z, 14 + rr() * 16, 14 + rr() * 16, 120 + rr() * 200, r >= 140); } // the skyline behind our tower
   for (let i = 0; i < 70; i++) { const s = rr() < .5 ? -1 : 1; tower(F, s * (150 + rr() * 300), -200 - rr() * 700, 20 + rr() * 20, 20 + rr() * 20, 80 + rr() * 300, true); } // the far skyline
   roof.add(B.build(), F.build(false));
   const ig = new THREE.BufferGeometry(); ig.setAttribute('position', new THREE.Float32BufferAttribute(inkPos, 3)); roof.add(new THREE.LineSegments(ig, RMAT.ink));
@@ -603,14 +606,14 @@ boardReady.then(() => { const c = boardG.children[0].clone(true); streetBoard.ad
 
 const LAND = V3(0, 0, -56), LEDGE = V3(8, ROOF_Y + 1.1, -2.4);
 // he faces his board, far below; the camera floats high over his shoulder looking steeply down the canyon (the painting's POV)
-const FWD = V3(LAND.x - LEDGE.x, 0, LAND.z - LEDGE.z).normalize(), RGT = V3(-FWD.z, 0, FWD.x), FACE = Math.atan2(-FWD.z, FWD.x); // the model's nose is +X
-const TURN = .9; // fraction of the way to face the camera; on the ledge he stands turned toward the camera; in the crouch he squares up to the drop
+const FWD = V3(LAND.x - LEDGE.x, 0, LAND.z - LEDGE.z).normalize(), RGT = V3(-FWD.z, 0, FWD.x), FACE = Math.atan2(FWD.x, FWD.z); // the snout points +Z at rest (measured)
+const TURN = 0; // fraction of the way to face the camera; on the ledge he stands turned toward the camera; in the crouch he squares up to the drop
 const at = (f, u, r) => LEDGE.clone().addScaledVector(FWD, f).addScaledVector(RGT, r).add(V3(0, u, 0));
 const AK = {
-  close: { pos: at(-.45, .78, 1.45), look: at(.15, .52, 0), fov: 34 },   // along the ledge, face to face: his mask fills the frame, the drop behind him
-  wide: { pos: at(-.85, 1.05, 2.05), look: at(1.5, -.9, -.6), fov: 50 },  // pull back along the ledge: him turned to us, the canyon falling away past him
+  close: { pos: at(1.35, .45, .55), look: at(0, .58, 0), fov: 36 },    // floating in the void in front of him: his mask fills the frame
+  wide: { pos: at(2.7, .55, 1.15), look: at(0, .5, -.15), fov: 44 },    // drift back and down: he peers over the edge at us, towers rising behind him
 };
-const LEDGE_YAW = (() => { const d = AK.wide.pos.clone().sub(LEDGE); let a = Math.atan2(-d.z, d.x) - FACE; a = Math.atan2(Math.sin(a), Math.cos(a)); return a * TURN; })();
+const LEDGE_YAW = (() => { const d = AK.wide.pos.clone().sub(LEDGE); let a = Math.atan2(d.x, d.z) - FACE; a = Math.atan2(Math.sin(a), Math.cos(a)); return a * TURN; })();
 const INTRO = { on: false, ph: 'off', t: 0, a: null, b: null, bt: 0, dur: 1 };
 function camKey(k, dur) { INTRO.a = { pos: camState.pos.clone(), look: camState.look.clone(), fov: camState.fov }; INTRO.b = AK[k]; INTRO.bt = 0; INTRO.dur = dur; }
 function stepCamKey(dt) { if (!INTRO.b) return; INTRO.bt = Math.min(1, INTRO.bt + dt / INTRO.dur); const k = ease(INTRO.bt); camState.pos.lerpVectors(INTRO.a.pos, INTRO.b.pos, k); camState.look.lerpVectors(INTRO.a.look, INTRO.b.look, k); camState.fov = lerp(INTRO.a.fov, INTRO.b.fov, k); }
@@ -632,14 +635,14 @@ function stepIntro(dt) {
     windGust(.35 + Math.sin(clock * .6) * .15);
   }
   if (INTRO.ph === 'crouch') { // anticipation: sink, lean back, arms back, hood tip flicks
-    const k = ease(clamp(t / .55, 0, 1)); RIG.crouch = .15 + k * .9; RIG.stT = -.32 * k + (k > .9 ? Math.sin(t * 60) * .015 : 0); RIG.armsUp = -k * .5; RIG.headYaw = lerp(RIG.headYaw ?? 0, 0, k);
-    skater.rotation.z = k * .18; skater.rotation.y = FACE + LEDGE_YAW * (1 - ease(clamp(t / .45, 0, 1))); windGust(.5);
-    if (t > .6) { INTRO.ph = 'leap'; INTRO.t = 0; RIG.squish = 0; RIG.stv = 7; RIG.stT = .26; whoosh(1.2); clack(.3); return; }
+    const k = ease(clamp(t / .55, 0, 1)); RIG.crouch = .15 + k * .9; RIG.stT = -.2 * k + (k > .9 ? Math.sin(t * 60) * .015 : 0); RIG.armsUp = -k * .5; RIG.headYaw = lerp(RIG.headYaw ?? 0, 0, k);
+    skater.rotation.x = -k * .18; skater.rotation.y = FACE + LEDGE_YAW * (1 - ease(clamp(t / .45, 0, 1))); windGust(.5);
+    if (t > .6) { INTRO.ph = 'leap'; INTRO.t = 0; RIG.squish = 0; RIG.stv = 5; RIG.stT = .16; whoosh(1.2); clack(.3); return; }
   }
   if (INTRO.ph === 'leap') { // spring up and out over the edge, body stretched
     const k = clamp(t / .5, 0, 1); RIG.crouch = Math.max(0, 1 - k * 4) * 1.05; RIG.armsUp = lerp(-.5, .85, ease(Math.min(1, k * 2)));
-    skater.position.copy(LEDGE).addScaledVector(FWD, k * 3.2).y += Math.sin(k * Math.PI) * 1.5; skater.rotation.z = -lerp(-.18, .55, ease(k));
-    RIG.stT = lerp(.26, .12, k);
+    skater.position.copy(LEDGE).addScaledVector(FWD, k * 3.2).y += Math.sin(k * Math.PI) * 1.5; skater.rotation.x = lerp(-.18, .55, ease(k));
+    RIG.stT = lerp(.16, .08, k);
     _fl.copy(skater.position).addScaledVector(FWD, .8).y -= .1; camState.look.lerp(_fl, damp(dt, 12)); _fp.copy(skater.position).addScaledVector(FWD, -3.4).addScaledVector(RGT, 1.1).y += 2.6; camState.pos.lerp(_fp, damp(dt, 3.5)); camState.fov = lerp(camState.fov, 55, damp(dt, 3));
     if (t >= .5) { INTRO.ph = 'fall'; INTRO.t = 0; INTRO.f0 = skater.position.clone(); INTRO.blend = true; INTRO.cp0 = camState.pos.clone(); INTRO.cl0 = camState.look.clone(); fallSound(); return; }
   }
@@ -647,9 +650,9 @@ function stepIntro(dt) {
     const D = 2.5, u = clamp(t / D, 0, 1), f0 = INTRO.f0;
     const h = 1 - Math.pow(1 - u, 1.6); skater.position.set(lerp(f0.x, LAND.x, h) + RGT.x * Math.sin(u * Math.PI) * 1.2, lerp(f0.y, 0, u * u), lerp(f0.z, LAND.z, h) + RGT.z * Math.sin(u * Math.PI) * 1.2);
     const flip = clamp((u - .62) / .3, 0, 1); // dive at ~70° → forward flip (2π) → upright
-    skater.rotation.z = -(lerp(.55, 1.2, Math.min(1, u / .5)) * (1 - ease(flip)) + ease(flip) * Math.PI * 2 * (1 - Math.pow(1 - flip, 2)) * 0 + (flip > 0 ? ease(flip) * Math.PI * 2 : 0)); // pitch: the model nose is +X, so pitch is about Z
-    skater.rotation.x = Math.sin(u * 9) * .06 * (1 - flip);
-    RIG.armsUp = flip < 1 ? .75 - flip * .55 : .2; RIG.flail = (Math.sin(clock * 13) * .22 + Math.sin(clock * 21) * .08) * (1 - flip); RIG.crouch = flip * .7; RIG.stT = .14 * (1 - flip) - .24 * Math.sin(flip * Math.PI) + (flip >= 1 ? .08 : 0);
+    skater.rotation.x = (lerp(.55, 1.2, Math.min(1, u / .5)) * (1 - ease(flip)) + ease(flip) * Math.PI * 2 * (1 - Math.pow(1 - flip, 2)) * 0 + (flip > 0 ? ease(flip) * Math.PI * 2 : 0)); // forward pitch about X (snout is +Z)
+    skater.rotation.z = Math.sin(u * 9) * .06 * (1 - flip);
+    RIG.armsUp = flip < 1 ? .75 - flip * .55 : .2; RIG.flail = (Math.sin(clock * 13) * .22 + Math.sin(clock * 21) * .08) * (1 - flip); RIG.crouch = flip * .7; RIG.stT = .1 * (1 - flip) - .16 * Math.sin(flip * Math.PI) + (flip >= 1 ? .08 : 0);
     if (R01() < dt * 14) { buttWorld(); GAS.emit(_bp.x, _bp.y, _bp.z, { vx: 0, vy: 6, vz: 0, life: .8, s0: .04, s1: .14, heat: 1, drag: 3 }); } // nervous toots stream up
     _fp.copy(skater.position); // chase camera: above-behind, swinging low and to the side for the landing
     const sideK = ease(clamp((u - .55) / .45, 0, 1));
@@ -658,7 +661,7 @@ function stepIntro(dt) {
     if (INTRO.blend) { INTRO.blend = false; _cpo.copy(INTRO.cp0).sub(camState.pos); _clo.copy(INTRO.cl0).sub(camState.look); } // ease out of the leap camera
     const bk = 1 - ease(clamp(t / .45, 0, 1)); camState.pos.addScaledVector(_cpo, bk); camState.look.addScaledVector(_clo, bk); camState.fov = lerp(55, 44, sideK); camState.ap = .2;
     windGust(.4 + u * .8);
-    if (u >= 1) { INTRO.ph = 'land'; INTRO.t = 0; skater.rotation.set(0, FACE, 0); skater.position.copy(LAND); streetBoard.visible = false; boardG.visible = true; RIG.squish = 1; RIG.crouch = 1; RIG.stT = 0; RIG.stv = -8; RIG.flail = 0; RIG.armsUp = .5; landSound(); windGust(.1);
+    if (u >= 1) { INTRO.ph = 'land'; INTRO.t = 0; skater.rotation.set(0, FACE, 0); skater.position.copy(LAND); streetBoard.visible = false; boardG.visible = true; RIG.squish = 1; RIG.crouch = 1; RIG.stT = 0; RIG.stv = -6; RIG.flail = 0; RIG.armsUp = .5; landSound(); windGust(.1);
       for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; GAS.emit(LAND.x + Math.cos(a) * .4, .1, LAND.z + Math.sin(a) * .4, { vx: Math.cos(a) * 3, vy: .4, vz: Math.sin(a) * 3, life: .9, s0: .05, s1: .22, heat: 0, drag: 3 }); } return; }
   }
   if (INTRO.ph === 'land') { // impact squash → recover → first proper fart
@@ -753,9 +756,9 @@ function tick(dt) {
 document.addEventListener('visibilitychange', () => { if (document.hidden) { cancelAnimationFrame(raf); SND.ctx?.suspend(); } else { last = performance.now(); raf = requestAnimationFrame(frame); SND.ctx?.resume(); } });
 
 /* ================================================================== gate, links, input */
-const setWord = w => { $('gword').innerHTML = [...w].map((c, i) => `<span style="--i:${i}" aria-hidden="true">${c}</span>`).join(''); $('enter').setAttribute('aria-label', w === 'ENTER' ? 'Enter' : 'Loading'); };
+const setWord = w => { $('gword').textContent = w === 'ENTER' ? '\u25B6 PRESS ENTER' : 'LOADING\u2026'; $('enter').setAttribute('aria-label', w === 'ENTER' ? 'Enter' : 'Loading'); };
 setWord('LOADING');
-{ const b = $('bubbles'); for (let i = 0; i < 18; i++) { const e = document.createElement('b'); e.style.cssText = `--s:${10 + Math.random() * 40}px;--d:${6 + Math.random() * 8}s;--dl:${-Math.random() * 10}s;--x:${Math.random() * 100}%;--w:${(Math.random() - .5) * 120}px`; b.append(e); } }
+dispatchLog(0);
 { const c = document.createElement('canvas'); c.width = c.height = 160; const x = c.getContext('2d'), d = x.createImageData(160, 160); for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; } x.putImageData(d, 0, 0); $('grain').style.background = `url(${c.toDataURL()})`; }
 const t0 = performance.now();
 Promise.all([sniffReady, boardReady, copReady, urbReady]).catch(e => { console.error(e); $('prog').textContent = 'a model failed to load'; }).then(() => {
