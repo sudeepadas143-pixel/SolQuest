@@ -76,16 +76,19 @@ def tube(name, pts, radii, res=12, bevel=1.0):
     o = link(bpy.data.objects.new(name, cu))
     activate(o); bpy.ops.object.convert(target='MESH'); return bpy.context.view_layer.objects.active
 
-def fuse(name, objs, voxel=0.006, smooth=6, smooth_factor=.5):
+def fuse(name, objs, voxel=0.006, smooth=6, smooth_factor=.5, target=None):
     """Union by voxel remesh (organic, seamless), then relax."""
-    for o in objs[1:]:
-        m = objs[0].modifiers.new('u', 'BOOLEAN'); m.operation = 'UNION'; m.object = o; m.solver = 'MANIFOLD' if hasattr(m, 'solver') else 'EXACT'
-    apply_mods(objs[0])
-    for o in objs[1:]: bpy.data.objects.remove(o, do_unlink=True)
-    o = objs[0]; o.name = name
+    bm = bmesh.new()  # join everything into one mesh; the voxel remesh below turns overlapping volumes into one surface
+    for o in objs:
+        me = o.data.copy(); me.transform(o.matrix_world); bm.from_mesh(me); bpy.data.meshes.remove(me)
+    o = objs[0]; bm.to_mesh(o.data); bm.free(); o.matrix_world = Matrix.Identity(4)
+    for x in objs[1:]: bpy.data.objects.remove(x, do_unlink=True)
+    o.name = name
     r = o.modifiers.new('r', 'REMESH'); r.mode = 'VOXEL'; r.voxel_size = voxel; r.adaptivity = 0
     s = o.modifiers.new('s', 'LAPLACIANSMOOTH'); s.iterations = smooth; s.lambda_factor = smooth_factor; s.use_volume_preserve = True
-    apply_mods(o); return o
+    apply_mods(o)
+    if target and len(o.data.polygons) > target: decimate(o, target / len(o.data.polygons))
+    return o
 
 def cut(obj, cutter, voxel=None, smooth=0):
     m = obj.modifiers.new('c', 'BOOLEAN'); m.operation = 'DIFFERENCE'; m.object = cutter
@@ -125,85 +128,83 @@ def assign(obj, mat):
 
 # ------------------------------------------------------------------ palette (sampled from the reference art)
 M = {
-    'robe': material('Robe', '#4a6236', rough=.62, coat=.25, coat_rough=.35),
-    'hood': material('Hood', '#4d6638', rough=.58, coat=.3, coat_rough=.3),
+    'robe': material('Robe', '#3d5329', rough=.7, coat=.15, coat_rough=.4),
+    'hood': material('Hood', '#3f562b', rough=.66, coat=.2, coat_rough=.35),
     'dark': material('HandDark', '#2c3a21', rough=.6, coat=.2),
     'face': material('Face', '#121412', rough=.32, coat=.7, coat_rough=.1),
-    'white': material('EyeWhite', '#f4f4f0', rough=.18, coat=.8, coat_rough=.05),
+    'white': material('EyeWhite', '#f2f2ee', rough=.2, coat=.8, coat_rough=.05),
     'rim': material('GoggleRim', '#e6e6e2', rough=.25, coat=.6),
     'pupil': material('Pupil', '#060606', rough=.1, coat=1.0, coat_rough=.02),
     'snout': material('Snout', '#1b1b1b', rough=.35, coat=.5),
     'steel': material('SnoutRim', '#a3a39e', rough=.28, metal=.6, coat=.3),
-    'belt': material('Belt', '#2a2016', rough=.55, coat=.2),
-    'brass': material('Buckle', '#c9a54e', rough=.22, metal=.9),
+    'belt': material('Belt', '#18200f', rough=.5, coat=.3),
+    'brass': material('Buckle', '#d6d2c0', rough=.3, metal=.35, coat=.4),
+    'hole': material('SnoutHole', '#030303', rough=.9),
     'shoe': material('Shoe', '#0b0b0c', rough=.3, coat=.8, coat_rough=.08),
 }
 
-# ------------------------------------------------------------------ body: robe, belt, buckle, feet, arms
-robe = lathe('Robe', [(0, .075), (.238, .075), (.262, .085), (.276, .115), (.272, .17), (.262, .24), (.245, .31),
-                      (.226, .37), (.205, .43), (.18, .49), (.15, .54), (0, .56)], segs=72)
-robe = subdiv(robe, 1); assign(robe, M['robe'])
+# ------------------------------------------------------------------ body: short flared robe, belt with a pale buckle, big shoes, nub arms
+def rbox(name, loc, size, bevel=.35):
+    bm = bmesh.new(); bmesh.ops.create_cube(bm, size=1.0); me = bpy.data.meshes.new(name); bm.to_mesh(me); bm.free()
+    o = link(bpy.data.objects.new(name, me)); o.data.transform(Matrix.Diagonal((*size, 1))); o.location = loc
+    bv = o.modifiers.new('b', 'BEVEL'); bv.width = min(size) * bevel; bv.segments = 4
+    sd = o.modifiers.new('s', 'SUBSURF'); sd.levels = sd.render_levels = 2; return apply_mods(o)
 
-belt = lathe('Belt', [(.236, .345), (.243, .352), (.245, .362), (.243, .372), (.236, .379), (.229, .372), (.229, .352), (.236, .345)], segs=72)
+robe = lathe('Robe', [(0, .08), (.262, .08), (.292, .092), (.304, .125), (.298, .18), (.278, .25), (.25, .31),
+                      (.215, .36), (.175, .4), (0, .42)], segs=72)
+robe = subdiv(robe, 1); assign(robe, M['robe'])
+belt = lathe('Belt', [(.262, .25), (.274, .256), (.277, .27), (.274, .284), (.262, .29), (.254, .284), (.254, .256), (.262, .25)], segs=72)
 belt = subdiv(belt, 1); assign(belt, M['belt'])
-buckle = sphere('Buckle', (0, -.245, .362), (.042, .012, .03), 32, 16)
-hole = sphere('h', (0, -.258, .362), (.024, .02, .014), 24, 12)
-buckle = cut(buckle, hole); smooth_shade(buckle); assign(buckle, M['brass'])
+buckle = rbox('Buckle', (0, -.272, .27), (.075, .018, .048), .3)
+buckle = cut(buckle, rbox('h', (0, -.285, .27), (.042, .03, .022), .3)); smooth_shade(buckle); assign(buckle, M['brass'])
 
 feet = []
 for s, nm in ((1, 'Foot_L'), (-1, 'Foot_R')):
-    f = sphere(nm, (s * .105, -.055, .055), (.085, .125, .06), 40, 20)
-    flat = sphere('fc', (s * .105, -.055, -.03), (.2, .25, .07), 16, 8)  # flatten the sole
-    f = cut(f, flat); f = fuse(nm, [f], voxel=.004, smooth=4); assign(f, M['shoe']); feet.append(f)
+    f = sphere(nm, (s * .12, -.1, .066), (.11, .155, .074), 40, 20)
+    flat = sphere('fc', (s * .12, -.1, -.03), (.25, .3, .075), 16, 8)  # flatten the sole
+    f = cut(f, flat); f = fuse(nm, [f], voxel=.004, smooth=4, target=1400); assign(f, M['shoe']); feet.append(f)
 
 arms = []
 for s, nm in ((1, 'Arm_L'), (-1, 'Arm_R')):
-    a = tube(nm, [Vector((s * .17, .01, .47)), Vector((s * .235, .0, .40)), Vector((s * .255, -.015, .31))], [.05, .046, .04], res=8)
-    hand = sphere('hand', (s * .258, -.022, .285), (.052, .048, .056), 32, 16)
-    arm = fuse(nm, [a], voxel=.005, smooth=4); assign(arm, M['robe']); arms.append(arm)
-    hand.name = 'Hand_' + nm[-1]; hand = fuse(hand.name, [hand], voxel=.004, smooth=3); assign(hand, M['dark']); arms.append(hand)
+    a = tube(nm, [Vector((s * .2, .02, .36)), Vector((s * .262, .0, .3)), Vector((s * .282, -.02, .225))], [.056, .05, .045], res=8)
+    hand = sphere('hand', (s * .284, -.03, .198), (.058, .054, .06), 32, 16)
+    arm = fuse(nm, [a], voxel=.005, smooth=4, target=1600); assign(arm, M['robe']); arms.append(arm)
+    hand.name = 'Hand_' + nm[-1]; hand = fuse(hand.name, [hand], voxel=.004, smooth=3, target=900); assign(hand, M['dark']); arms.append(hand)
 
-# ------------------------------------------------------------------ head: hood with the floppy tip, recessed black face
-TIP = [Vector((0, .035, .93)), Vector((.012, .115, 1.07)), Vector((.03, .23, 1.13)), Vector((.05, .335, 1.095))]
-dome = sphere('dome', (0, 0, .735), (.27, .255, .275), 64, 32)
-tip = tube('tip', TIP, [.15, .085, .042, .014], res=10)
+# ------------------------------------------------------------------ head: big hood with the floppy tip; a glossy black mask that bulges out of it
+TIP = [Vector((0, .04, .9)), Vector((.014, .13, 1.05)), Vector((.034, .255, 1.11)), Vector((.056, .37, 1.075))]
+dome = sphere('dome', (0, 0, .64), (.3, .285, .305), 64, 32)
+tip = tube('tip', TIP, [.165, .094, .047, .016], res=10)
 hood = fuse('Hood', [dome, tip], voxel=.006, smooth=10, smooth_factor=.6)
-opening = sphere('open', (0, -.215, .705), (.195, .14, .2), 48, 24)
-hood = cut(hood, opening, voxel=.005, smooth=6)
-hood = decimate(hood, .35); assign(hood, M['hood'])
-face = sphere('Face', (0, -.06, .705), (.188, .17, .195), 64, 32); assign(face, M['face'])
+hood = cut(hood, sphere('open', (0, -.25, .6), (.228, .15, .232), 48, 24), voxel=.005, smooth=6)
+hood = decimate(hood, min(1, 10000 / len(hood.data.polygons))); assign(hood, M['hood'])
+face = sphere('Face', (0, -.12, .6), (.216, .2, .226), 64, 32); assign(face, M['face'])
 
-# goggles: thick white rim, bulging white eye, glossy black pupil (pupils are their own nodes so they can look around)
-goggles, pupils = [], []
-for s, sx in ((1, 'L'), (-1, 'R')):
-    c = Vector((s * .078, -.215, .735)); tilt = Matrix.Rotation(s * math.radians(-17), 4, 'Z') @ Matrix.Rotation(math.radians(-4), 4, 'X')
-    tor = bpy.data.meshes.new('torus'); bm = bmesh.new()
-    R, r, U, V = .068, .019, 64, 16
+# goggles: thick white rings with glossy black lenses (as in the reference art)
+goggles = []
+def torus(name, R, r, U=64, V=16):
+    me = bpy.data.meshes.new(name); bm = bmesh.new()
     vs = [[bm.verts.new(((R + r * math.cos(v * 2 * math.pi / V)) * math.cos(u * 2 * math.pi / U), r * math.sin(v * 2 * math.pi / V),
                          (R + r * math.cos(v * 2 * math.pi / V)) * math.sin(u * 2 * math.pi / U))) for v in range(V)] for u in range(U)]
     for u in range(U):
         for v in range(V): bm.faces.new((vs[u][v], vs[(u + 1) % U][v], vs[(u + 1) % U][(v + 1) % V], vs[u][(v + 1) % V]))
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces); bm.to_mesh(tor); bm.free()
-    rim = link(bpy.data.objects.new('GoggleRim_' + sx, tor)); rim.data.transform(Matrix.Translation(c) @ tilt)
-    assign(rim, M['rim'])
-    eye = sphere('Eye_' + sx, (0, 0, 0), (.062, .026, .062), 48, 24); eye.data.transform(Matrix.Translation(c + tilt.to_3x3() @ Vector((0, -.004, 0))) @ tilt); assign(eye, M['white'])
-    pup = sphere('Pupil_' + sx, (0, 0, 0), (.03, .012, .034), 32, 16)
-    pc = c + tilt.to_3x3() @ Vector((-s * .012, -.024, -.006))
-    pup.data.transform(Matrix.Translation(pc) @ tilt); assign(pup, M['pupil']); pupils.append(pup)
-    goggles += [rim, eye]
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces); bm.to_mesh(me); bm.free(); return link(bpy.data.objects.new(name, me))
+for s, sx in ((1, 'L'), (-1, 'R')):
+    c = Vector((s * .1, -.338, .655)); tilt = Matrix.Rotation(s * math.radians(-14), 4, 'Z') @ Matrix.Rotation(math.radians(-6), 4, 'X')
+    cup = lathe('Cup_' + sx, [(0, .002), (.074, .002), (.082, .02), (.084, .11), (0, .11)], segs=48)  # goggle cup back into the mask
+    cup.data.transform(Matrix.Translation(c) @ tilt @ Matrix.Rotation(math.radians(-90), 4, 'X')); assign(cup, M['face']); goggles.append(cup)
+    rim = torus('GoggleRim_' + sx, .078, .03); rim.data.transform(Matrix.Translation(c) @ tilt); assign(rim, M['white'])
+    lens = sphere('Lens_' + sx, (0, 0, 0), (.062, .02, .062), 40, 20)
+    lens.data.transform(Matrix.Translation(c + tilt.to_3x3() @ Vector((0, .004, 0))) @ tilt); assign(lens, M['pupil'])
+    goggles += [rim, lens]
 
-# respirator snout: bevelled black canister, steel rim, recessed dark filter with vent holes
-snout = lathe('Snout', [(0, 0), (.05, 0), (.057, .006), (.059, .02), (.059, .07), (.054, .082), (.044, .086), (0, .086)], segs=48)
-snout.data.transform(Matrix.Translation((0, -.205, .628)) @ Matrix.Rotation(math.radians(90), 4, 'X'))
-snout = subdiv(snout, 1); assign(snout, M['snout'])
-srim = lathe('SnoutRim', [(.043, .083), (.054, .083), (.058, .089), (.054, .095), (.043, .095), (.04, .089), (.043, .083)], segs=48)
-srim.data.transform(Matrix.Translation((0, -.205, .628)) @ Matrix.Rotation(math.radians(90), 4, 'X'))
-srim = subdiv(srim, 1); assign(srim, M['steel'])
-grill = sphere('Grill', (0, -.29, .628), (.041, .006, .041), 40, 12)
-for k in range(7):
-    a = k / 7 * 2 * math.pi; x, z = (0, 0) if k == 0 else (.022 * math.cos(a), .022 * math.sin(a))
-    if k: grill = cut(grill, sphere('v', (x, -.297, .628 + z), (.007, .01, .007), 12, 8))
-grill = cut(grill, sphere('v', (0, -.297, .628), (.008, .01, .008), 12, 8)); assign(grill, M['snout'])
+# respirator snout: a big black canister with a white rim and a dark recessed filter
+SN_T = Matrix.Translation((0, -.268, .528)) @ Matrix.Rotation(math.radians(98), 4, 'X')
+snout = lathe('Snout', [(0, 0), (.064, 0), (.074, .01), (.078, .03), (.078, .1), (.072, .114), (.06, .12), (0, .12)], segs=48)
+snout.data.transform(SN_T); snout = subdiv(snout, 1); assign(snout, M['snout'])
+srim = lathe('SnoutRim', [(.054, .112), (.074, .112), (.083, .122), (.076, .132), (.056, .132), (.05, .122), (.054, .112)], segs=48)
+srim.data.transform(SN_T); srim = subdiv(srim, 1); assign(srim, M['white'])
+grill = lathe('Grill', [(0, .1), (.05, .1), (.053, .118), (0, .112)], segs=40); grill.data.transform(SN_T); assign(grill, M['hole'])
 
 # ------------------------------------------------------------------ armature + deterministic weights
 arm_d = bpy.data.armatures.new('SnifferRig'); rig = link(bpy.data.objects.new('SnifferRig', arm_d))
@@ -212,12 +213,11 @@ def bone(n, h, t, parent=None):
     b = arm_d.edit_bones.new(n); b.head = h; b.tail = t
     if parent: b.parent = arm_d.edit_bones[parent]
     return b
-bone('root', (0, 0, 0), (0, 0, .07)); bone('body', (0, 0, .075), (0, 0, .5), 'root'); bone('head', (0, 0, .52), (0, 0, .9), 'body')
+bone('root', (0, 0, 0), (0, 0, .07)); bone('body', (0, 0, .08), (0, 0, .4), 'root'); bone('head', (0, 0, .42), (0, 0, .85), 'body')
 bone('tip1', TIP[0], TIP[1], 'head'); bone('tip2', TIP[1], TIP[2], 'tip1'); bone('tip3', TIP[2], TIP[3], 'tip2')
-bone('arm_L', (.17, .01, .47), (.255, -.015, .31), 'body'); bone('arm_R', (-.17, .01, .47), (-.255, -.015, .31), 'body')
-bone('foot_L', (.105, -.0, .06), (.105, -.15, .06), 'root'); bone('foot_R', (-.105, 0, .06), (-.105, -.15, .06), 'root')
-bone('pupil_L', (.078, -.2, .735), (.078, -.26, .735), 'head'); bone('pupil_R', (-.078, -.2, .735), (-.078, -.26, .735), 'head')
-bone('snout', (0, -.2, .628), (0, -.29, .628), 'head')
+bone('arm_L', (.2, .02, .36), (.282, -.02, .225), 'body'); bone('arm_R', (-.2, .02, .36), (-.282, -.02, .225), 'body')
+bone('foot_L', (.12, -.03, .066), (.12, -.2, .066), 'root'); bone('foot_R', (-.12, -.03, .066), (-.12, -.2, .066), 'root')
+bone('snout', (0, -.26, .53), (0, -.39, .515), 'head')
 bpy.ops.object.mode_set(mode='OBJECT')
 
 def skin(obj, weights):
@@ -241,8 +241,8 @@ def seg_param(p):
         if d < best: best, bt = d, i + t
     return bt
 def hood_w(p):
-    if p.z < .86: return {'head': 1}
-    t = seg_param(p); base = max(0, min(1, (p.z - .86) / .09))  # blend into the chain over the top of the dome
+    if p.z < .84: return {'head': 1}
+    t = seg_param(p); base = max(0, min(1, (p.z - .84) / .09))  # blend into the chain over the top of the dome
     if t <= 0.0: return {'head': 1 - base * .5, 'tip1': base * .5}
     i = min(2, int(t)); f = t - i
     w = {'head': 0.0, 'tip1': 0.0, 'tip2': 0.0, 'tip3': 0.0}
@@ -257,7 +257,6 @@ for f, s in zip(feet, 'LR'): skin(f, {'foot_' + s: 1})
 for a in arms: skin(a, {'arm_' + a.name[-1]: 1})
 skin(hood, hood_w); skin(face, {'head': 1})
 for g in goggles: skin(g, {'head': 1})
-for p, s in zip(pupils, 'LR'): skin(p, {'pupil_' + s: 1})
 for o in (snout, srim, grill): skin(o, {'snout': 1})
 
 # ------------------------------------------------------------------ bake ambient occlusion into vertex colours (multiplies base colour in three.js)
