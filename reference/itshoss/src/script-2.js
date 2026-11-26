@@ -1,0 +1,1331 @@
+
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+/* ---------- flags ---------- */
+const Q = new URLSearchParams(location.search), $ = id => document.getElementById(id);
+const MOBILE = matchMedia('(max-width:820px),(pointer:coarse)').matches;
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const RAW = Q.has('raw'), DBG = Q.has('dbg'), HOLD = Q.has('hold');
+const V3 = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const lerp = (a, b, k) => a + (b - a) * k, clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const ease = k => k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+
+/* ---------- renderer ---------- */
+const cvs = $('gl');
+const R = new THREE.WebGLRenderer({ canvas: cvs, antialias: RAW, powerPreference: 'high-performance', preserveDrawingBuffer: Q.has('shot') || Q.has('t') });
+R.outputColorSpace = THREE.SRGBColorSpace;
+R.shadowMap.enabled = true; R.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+// PS2-era look: light daytime haze, linear fog that swallows everything before the prop loop wraps (no pop-in)
+const FOG = new THREE.Color(0xa9c6e4), FOG_FAR = 148; // light daytime haze
+scene.background = FOG.clone(); scene.fog = new THREE.Fog(FOG, 60, FOG_FAR);
+const pm = new THREE.PMREMGenerator(R);
+scene.environment = pm.fromScene(new RoomEnvironment(), .04).texture; scene.environmentIntensity = .35;
+const cam = new THREE.PerspectiveCamera(30, 1, .1, 400);
+
+/* ---------- light: bright sun high ahead-left, blue sky fill ---------- */
+const SUN = V3(.62, .62, -.48).normalize(); // high, bright midday-ish sun ahead-left
+// one sky function for the dome and the fog, so anything fully fogged is exactly sky-coloured (sun glow included) → wrapped props never pop
+const SKY_GLSL = `vec3 skyCol(vec3 d, vec3 fc){ vec3 c = mix(fc, vec3(.08,.24,.68), smoothstep(.0,.4,d.y)); float s = max(dot(d, vec3(${SUN.toArray().map(v => v.toFixed(4))})), 0.);
+  return c + vec3(1.,.92,.75)*pow(s,8.)*.3 + vec3(1.,.96,.88)*pow(s,90.)*.9; }`;
+{
+  const C = THREE.ShaderChunk;
+  C.fog_pars_vertex += `
+#ifdef USE_FOG
+varying vec3 vFogDir;
+#endif`;
+  C.fog_vertex = `#ifdef USE_FOG
+vFogDepth = - mvPosition.z; vFogDir = (modelMatrix * vec4(transformed, 1.)).xyz - cameraPosition;
+#endif`;
+  C.fog_pars_fragment += `
+#ifdef USE_FOG
+varying vec3 vFogDir;
+${SKY_GLSL}
+#endif`;
+  C.fog_fragment = `#ifdef USE_FOG
+gl_FragColor.rgb = mix(gl_FragColor.rgb, skyCol(normalize(vFogDir), fogColor), smoothstep(fogNear, fogFar, vFogDepth));
+#endif`;
+}
+scene.add(new THREE.HemisphereLight(0xb8d0ee, 0x6a5a42, 1.05));
+const sunL = new THREE.DirectionalLight(0xfff0d8, 3.3);
+sunL.position.copy(SUN).multiplyScalar(40); sunL.castShadow = true;
+sunL.shadow.mapSize.set(MOBILE ? 1024 : 2048, MOBILE ? 1024 : 2048);
+Object.assign(sunL.shadow.camera, { left: -13, right: 13, top: 13, bottom: -13, near: 1, far: 90 });
+sunL.shadow.bias = -.0005; sunL.shadow.normalBias = .03;
+scene.add(sunL, sunL.target);
+
+/* ---------- seeded canvas textures (low-res, nearest filtered) ---------- */
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+function canvasTex(w, h, draw, repeat) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestMipmapLinearFilter;
+  if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(...repeat); }
+  return t;
+}
+const speck = (x, w, h, n, f) => { for (let i = 0; i < n; i++) { x.fillStyle = f(); x.fillRect(rnd() * w | 0, rnd() * h | 0, 1, 1); } };
+// road: canvas x = 12 m along the road (.25 m/px), canvas y = 26 m across (z −19.5 → 6.5)
+const RZ0 = -19.5, RW = 26, DASH = 12;
+const roadTex = canvasTex(48, 104, (x, w, h) => {
+  x.fillStyle = '#4a4540'; x.fillRect(0, 0, w, h);
+  speck(x, w, h, 1400, () => { const v = 66 + rnd() * 14 | 0; return `rgb(${v},${v - 4},${v - 9})`; });
+  const row = z => Math.round((z - RZ0) / .25);
+  for (const c of [-16.4, -12.8, -9.2, -3.6, 0, 3.6]) for (const o of [-.9, .9]) { x.fillStyle = 'rgba(25,22,20,.18)'; x.fillRect(0, row(c + o), w, 2); } // tyre wear
+  x.fillStyle = '#7b746a'; x.fillRect(0, row(-7.4), w, row(-5.4) - row(-7.4)); // median slab
+  x.fillStyle = '#5d5750'; x.fillRect(0, 0, w, row(-18.2)); x.fillRect(0, row(5.4), w, h); // shoulders
+  x.fillStyle = '#d8b04a'; for (const z of [-7.4, -5.4]) x.fillRect(0, row(z) - (z > -6 ? 0 : 1), w, 1); // yellow edge lines
+  x.fillStyle = '#d9d4c8'; for (const z of [-18.2, 5.4]) x.fillRect(0, row(z), w, 1);
+  for (const z of [-14.6, -11, -1.8, 1.8]) x.fillRect(0, row(z), 12, 1); // 3 m dash, 9 m gap
+}, [400 / DASH, 1]);
+const groundTex = canvasTex(32, 32, (x, w, h) => {
+  x.fillStyle = '#86734c'; x.fillRect(0, 0, w, h);
+  speck(x, w, h, 500, () => rnd() < .5 ? `rgb(${110 + rnd() * 30 | 0},${96 + rnd() * 20 | 0},${60 + rnd() * 10 | 0})` : `rgb(${80 + rnd() * 20 | 0},${78 + rnd() * 20 | 0},${44 + rnd() * 10 | 0})`);
+}, [400 / 6, 400 / 6]);
+const facadeTex = canvasTex(16, 32, (x, w, h) => { // 8 m × 12 m: 4 windows × 4 floors; bottom-left pixel stays wall (roofs sample it)
+  x.fillStyle = '#ffffff'; x.fillRect(0, 0, w, h);
+  for (let f = 0; f < 4; f++) for (let c = 0; c < 4; c++) { x.fillStyle = rnd() < .25 ? '#6f6650' : '#4a5260'; x.fillRect(c * 4 + 1, f * 8 + 2, 2, 3); }
+  x.fillStyle = '#d8d0c4'; for (let f = 0; f < 4; f++) x.fillRect(0, f * 8 + 6, w, 1);
+});
+const frondTex = canvasTex(32, 8, (x, w, h) => { // u: trunk → tip
+  for (let i = 0; i < w; i++) {
+    const half = Math.round((1 - i / w) * 3 + .5);
+    for (let j = -half; j <= half; j++) if ((i + Math.abs(j)) % 2 === 0 || j === 0) { x.fillStyle = j === 0 ? '#5d6b2c' : (rnd() < .5 ? '#4a6326' : '#64803a'); x.fillRect(i, 4 + j, 1, 1); }
+  }
+});
+const signTex = canvasTex(32, 18, (x, w, h) => { // blank-ish overhead sign: border, two bars, two lane arrows (no text)
+  x.fillStyle = '#1f6a3e'; x.fillRect(0, 0, w, h); x.fillStyle = '#e8eee8';
+  x.strokeStyle = '#e8eee8'; x.lineWidth = 1; x.strokeRect(1.5, 1.5, w - 3, h - 3);
+  x.fillRect(4, 4, 14, 2); x.fillRect(4, 7, 10, 2);
+  for (const ax of [8, 22]) { x.fillRect(ax, 10, 2, 4); x.beginPath(); x.moveTo(ax - 2, 13); x.lineTo(ax + 4, 13); x.lineTo(ax + 1, 16); x.fill(); }
+});
+
+/* ---------- materials: shared, vertex-coloured so each tile / car merges into a few draw calls ---------- */
+const MAT = {
+  flat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .9, flatShading: true }),
+  glow: new THREE.MeshBasicMaterial({ vertexColors: true }),
+  bld: new THREE.MeshStandardMaterial({ vertexColors: true, map: facadeTex, roughness: .95 }),
+  frond: new THREE.MeshStandardMaterial({ vertexColors: true, map: frondTex, alphaTest: .5, side: THREE.DoubleSide, roughness: 1 }),
+  sign: new THREE.MeshStandardMaterial({ vertexColors: true, map: signTex, roughness: .8 }),
+};
+const _m4 = new THREE.Matrix4(), _eu = new THREE.Euler(), _qu = new THREE.Quaternion(), _sc = V3(), _ps = V3();
+const T = (x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1, order = 'XYZ') =>
+  _m4.clone().compose(_ps.set(x, y, z), _qu.setFromEuler(_eu.set(rx, ry, rz, order)), _sc.set(sx, sy, sz));
+const box = (w, h, d) => new THREE.BoxGeometry(w, h, d), cyl = (a, b, h, n) => new THREE.CylinderGeometry(a, b, h, n);
+function bag() { // collects (geometry, material, colour, matrix) → one merged mesh per material
+  const L = new Map();
+  return {
+    add(geo, mat, col = 0xffffff, m = null, k = 1) {
+      let g = geo.index ? geo.toNonIndexed() : geo.clone();
+      for (const n of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(n)) g.deleteAttribute(n);
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+      if (!g.attributes.normal) g.computeVertexNormals();
+      const c = new THREE.Color(col).multiplyScalar(k), n = g.attributes.position.count, a = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) a.set([c.r, c.g, c.b], i * 3);
+      g.setAttribute('color', new THREE.BufferAttribute(a, 3)); g.clearGroups();
+      if (m) g.applyMatrix4(m);
+      if (!L.has(mat)) L.set(mat, []); L.get(mat).push(g);
+    },
+    build(shadow = true) {
+      const grp = new THREE.Group();
+      for (const [mat, list] of L) { const m = new THREE.Mesh(mergeGeometries(list), mat); m.castShadow = shadow && mat !== MAT.glow; m.receiveShadow = true; grp.add(m); }
+      return grp;
+    },
+  };
+}
+
+/* ---------- road + ground: static planes, texture offset scrolls (seamless forever) ---------- */
+const SPEED = 26; // m/s, ~95 km/h
+let dist = 0;
+const road = new THREE.Mesh(new THREE.PlaneGeometry(400, RW).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: roadTex, roughness: .92 }));
+road.position.z = RZ0 + RW / 2; road.receiveShadow = true; scene.add(road);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: groundTex, roughness: 1 }));
+ground.position.set(0, -.03, -6.5); ground.receiveShadow = true; scene.add(ground);
+
+/* ---------- roadside: 6 different 60 m tiles that wrap behind the fog (period 360 m ≈ 14 s) ---------- */
+const TL = 60, NT = 6, LOOP = TL * NT, HB = 210; // tile length, count, loop length, how far behind a tile goes before it wraps to the front
+const wrapX = x => ((x + HB) % LOOP + LOOP) % LOOP - HB;
+function palm(B, x, z, h) {
+  const lean = (rnd() - .5) * .14;
+  B.add(cyl(.12, .2, h, 5), MAT.flat, 0x7a6450, T(x, h / 2, z, lean, 0, lean));
+  const tx = x - Math.sin(lean) * h * .5, tz = z + Math.sin(lean) * h * .5, a0 = rnd() * 6;
+  for (let k = 0; k < 7; k++) B.add(new THREE.PlaneGeometry(3.4, 1).translate(1.7, 0, 0), MAT.frond, 0xffffff, T(tx, h - .1, tz, -Math.PI / 2, a0 + k * .9, -.35 - rnd() * .3, 1, 1, 1, 'YZX'));
+}
+function building(B, x, z, w, h, d, col) {
+  const g = box(w, h, d), uv = g.attributes.uv, S = [[d, h], [d, h], [0, 0], [0, 0], [w, h], [w, h]];
+  for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const j = f * 4 + v; uv.setXY(j, uv.getX(j) * S[f][0] / 8, uv.getY(j) * S[f][1] / 12); }
+  B.add(g, MAT.bld, col, T(x, h / 2, z));
+  if (rnd() < .6) B.add(box(2 + rnd() * 2, 1.2, 2 + rnd() * 2), MAT.flat, 0x8e877c, T(x + (rnd() - .5) * w * .5, h + .6, z + (rnd() - .5) * d * .5));
+}
+function gantry(B, x) {
+  const M = 0x8d9094;
+  for (const z of [-6.0, 7.0]) B.add(box(.45, 7, .45), MAT.flat, M, T(x, 3.5, z));
+  for (const y of [6.75, 5.85]) for (const dx of [-.3, .3]) B.add(box(.14, .14, 13.4), MAT.flat, M, T(x + dx, y, .5));
+  for (let k = 0; k < 13; k++) for (const dx of [-.3, .3]) B.add(box(.07, 1.25, .07), MAT.flat, M, T(x + dx, 6.3, -5.5 + k, k % 2 ? .78 : -.78, 0, 0));
+  for (const z of [-2.4, 2.6]) B.add(box(.12, 2, 3.6), MAT.sign, 0xffffff, T(x - .35, 4.7, z));
+  B.add(box(.35, 1.05, .35), MAT.flat, 0x1b1b1b, T(x - .4, 5.2, 5.7));
+  B.add(box(.05, .2, .2), MAT.flat, 0x3a1410, T(x - .6, 5.5, 5.7)); B.add(box(.05, .2, .2), MAT.flat, 0x3a2a10, T(x - .6, 5.2, 5.7));
+  B.add(box(.05, .2, .2), MAT.glow, 0x3dff7a, T(x - .6, 4.9, 5.7), 3); // green light (bloom)
+}
+function buildTile(i) {
+  const B = bag(); seed = 101 + i * 37;
+  B.add(box(TL, .8, .4), MAT.flat, 0x9a9184, T(TL / 2, .4, -6.4)); // median barrier (continuous across tiles)
+  B.add(box(TL, .12, .7), MAT.flat, 0x8b8377, T(TL / 2, .06, -6.4));
+  for (const z of [6.9, -19.9]) { B.add(box(TL, .3, .06), MAT.flat, 0xa3a6aa, T(TL / 2, .62, z)); for (let x = 2; x < TL; x += 4) B.add(box(.1, .62, .1), MAT.flat, 0x6e6a64, T(x, .31, z)); }
+  for (const x of [0, 30]) { // median lamp posts
+    B.add(cyl(.09, .14, 9, 6), MAT.flat, 0x74777b, T(x, 4.5, -6.4));
+    for (const s of [-1, 1]) { B.add(box(.1, .1, 2.4), MAT.flat, 0x74777b, T(x, 8.9, -6.4 + s * 1.2)); B.add(box(.55, .14, .3), MAT.flat, 0x4a4c50, T(x, 8.84, -6.4 + s * 2.4)); }
+  }
+  for (const x of [0, 30]) { // power line on the right; each wire runs to the next pole (the 30 → 60 span meets the next tile's pole at 0)
+    B.add(cyl(.12, .17, 11, 6), MAT.flat, 0x5a4232, T(x, 5.5, 13));
+    B.add(box(.15, .15, 2.8), MAT.flat, 0x5a4232, T(x, 10.4, 13));
+    for (const dz of [-1.2, 0, 1.2]) {
+      const pts = []; for (let k = 0; k <= 8; k++) { const u = k / 8; pts.push(V3(x + u * 30, 10.55 - 4 * u * (1 - u) * 1.2, 13 + dz)); }
+      B.add(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 8, .035, 3), MAT.flat, 0x1c1a18);
+    }
+  }
+  for (let k = 0, n = 3 + (rnd() * 3 | 0); k < n; k++) { const r = rnd() < .65; palm(B, rnd() * TL, r ? 9 + rnd() * 6 : -(22 + rnd() * 5), 7 + rnd() * 6); }
+  for (let k = 0; k < 9; k++) { const s = .6 + rnd() * 1.1, r = rnd() < .6; B.add(new THREE.DodecahedronGeometry(1, 0), MAT.flat, rnd() < .5 ? 0x5b6630 : 0x6e6a38, T(rnd() * TL, s * .3, r ? 8 + rnd() * 8 : -(21 + rnd() * 6), 0, rnd() * 6, 0, s, s * .6, s)); }
+  const COLS = [0xd9c7a8, 0xe9e1d2, 0xd4a58c, 0xb9b3a6, 0xc9b48a, 0xa8a29a];
+  for (const side of [1, -1]) {
+    let x = rnd() * 6;
+    for (;;) {
+      const w = 8 + rnd() * 14; if (x + w > TL - 1) break;
+      const d = 10 + rnd() * 8, h = 6 + rnd() * rnd() * 26, z = side > 0 ? 22 + d / 2 + rnd() * 8 : -(28 + d / 2 + rnd() * 8);
+      building(B, x + w / 2, z, w, h, d, COLS[rnd() * COLS.length | 0]); x += w + 2 + rnd() * 9;
+    }
+  }
+  if (i % 3 === 1) gantry(B, 40);
+  const g = B.build(); g.userData.x0 = i * TL; scene.add(g); return g;
+}
+const tiles = Array.from({ length: NT }, (_, i) => buildTile(i));
+
+/* ---------- cars (all glTF, forward +X, ground y = 0) ---------- */
+// HONK's car: "POSTAL 4: No Regerts - Golf Car" (an old beat-up hatchback) by Zorg_Sinister; chaser: "Murphy '97 Cruiser" by Daniel Zhabotinsky
+// (both Sketchfab, CC-BY-4.0, credited on the page; compressed by _src/vehicle.mjs, windshield glass dropped). delorean.glb rides in traffic; cheetah.glb is kept, unused.
+const car = new THREE.Group(); scene.add(car);
+const CAR_S = .01; // raw Golf Car is in cm (3.86 m long, a real Mk1-size hatchback) and faces −X
+// IK anchor at the model's own steering wheel (measured on the raw interior mesh): local X = column axis, Y = wheel "up", Z = lateral
+const wheel = new THREE.Group(); wheel.rotation.z = -.35; wheel.position.set(.31, .85, -.33); car.add(wheel);
+const WRIST = [V3(-.04, .1, -.17), V3(-.04, .1, .17)]; // wrist targets near 10 and 2 o'clock (wheel-local)
+const SPIN = []; // rolling wheels: [node, rest quaternion, axle in parent space, radius, vehicle whose userData.d is the distance it has rolled]
+// GLTFLoader makes names unique (wheel_0, wheel_0_1, …) and a node's mesh can share its name: spin only the outermost match
+function spinWheels(root, re, veh) { root.traverse(o => { if (!re.test(o.name)) return; for (let p = o.parent; p; p = p.parent) if (re.test(p.name)) return; addSpin(o, veh); }); }
+function addSpin(o, veh) { // axle = world −Z at setup (a +X roll); radius from the wheel's own height; the vehicle's signed distance gives direction
+  o.parent.updateWorldMatrix(true, false); const b = new THREE.Box3().setFromObject(o);
+  SPIN.push([o, o.quaternion.clone(), V3(0, 0, -1).applyQuaternion(o.parent.getWorldQuaternion(new THREE.Quaternion()).invert()).normalize(), Math.max(.05, (b.max.y - b.min.y) / 2), veh]);
+}
+function prepCar(root) {
+  root.traverse(o => {
+    if (!o.isMesh) return;
+    const m = o.material, t = m.map; if (t) { t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestMipmapLinearFilter; t.needsUpdate = true; }
+    o.castShadow = !m.transparent; o.receiveShadow = true; o.frustumCulled = false; // skinned GTA meshes: bind-pose bounds are unreliable
+  });
+}
+// traffic: the 20 cars of "20 urban cars" by zairiq-123 (CC-BY-4.0), each used once; one speed per lane so cars never overlap,
+// opposite carriageway faces −X. Filled when urban.glb loads.
+const traffic = [], LANES = [[-3.6, 30, 4], [3.6, 21, 5], [-9.2, -24, 4], [-12.8, -28, 4], [-16.4, -22, 3]]; // z, m/s, cars (= 20)
+const URBAN_S = .49, URBAN_YAW = Math.PI / 2; // raw pack: ~2× real size, cars face +Z
+// the police cruiser tails HONK in his lane (no weapons); lightbar flashes red/blue
+const chaser = new THREE.Group(); chaser.userData = { x: -13, v: SPEED }; scene.add(chaser);
+const LIGHTBAR = [[4, .12, .08], [.12, .35, 4]].map(([r, g, b], i) => {
+  const m = new THREE.Mesh(box(.3, .08, .34), new THREE.MeshBasicMaterial()); m.material.color.setRGB(r, g, b); m.position.set(-.26, 1.55, i ? .2 : -.2); chaser.add(m); return m;
+});
+
+/* ---------- sky: clear blue gradient, sun disc (bloom catches it); horizon = fog colour so props melt into it ---------- */
+const sky = new THREE.Mesh(new THREE.SphereGeometry(350, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false, uniforms: { uSun: { value: SUN }, uFog: { value: FOG } },
+  vertexShader: `varying vec3 vP;void main(){vP=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+  fragmentShader: `uniform vec3 uSun,uFog;varying vec3 vP;${SKY_GLSL}
+    void main(){vec3 d=normalize(vP);gl_FragColor=vec4(skyCol(d,uFog)+vec3(6.,4.4,2.6)*smoothstep(.9993,.9996,dot(d,uSun)),1.);}`
+})); sky.renderOrder = -1; scene.add(sky);
+
+/* ---------- hero: placeholder group, GLB swapped in; sits in the driver's seat (left, −Z) ---------- */
+const HERO_S = .88; // 1.4 m roof: a slightly smaller HONK keeps his ears under it
+const hero = new THREE.Group(); hero.rotation.y = Math.PI / 2; hero.scale.setScalar(HERO_S); hero.position.set(-.1, .56 - .95 * HERO_S, -.33); car.add(hero);
+const HERO_P = hero.position.clone();
+const ph = new THREE.Mesh(new THREE.CapsuleGeometry(.28, 1.2, 6, 12).translate(0, .9, 0), new THREE.MeshStandardMaterial({ color: 0x555555 }));
+hero.add(ph);
+let mixer = null, ACT = {}, bones = {};
+const HEAD = V3(0, 1.6, 0);
+
+/* ---------- loading → gate ---------- */
+const prog = { a: 0, f: 0, g: 0 };
+/* ---------- gate: faceted swirl tunnel (raw WebGL, no three) + wobbly extruded word, late-90s console loader style ---------- */
+const setWord = w => { const h = $('gword'); $('enter').setAttribute('aria-label', w === 'ENTER' ? 'Enter' : 'Loading'); h.innerHTML = [...w].map((c, i) => `<span style="--i:${i}" data-c="${c}" aria-hidden="true">${c}</span>`).join(''); };
+setWord('LOADING');
+const swirl = (() => {
+  const cv = $('swirl'), gl = cv.getContext('webgl', { antialias: false }); if (!gl) return null;
+  const sh = (t, src) => { const o = gl.createShader(t); gl.shaderSource(o, src); gl.compileShader(o); return o; }, p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}'));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, `precision mediump float;uniform vec2 R;uniform float T;
+    float blob(vec2 u,vec2 c,vec2 s){vec2 d=(u-c)/s;return exp(-dot(d,d));}
+    void main(){vec2 q=gl_FragCoord.xy/R, u=(q-.5)*vec2(R.x/R.y,1.);
+      vec3 c=vec3(.155,.162,.148);                                        // the dark grey-green glass of the video's CRT
+      c+=vec3(.05,.06,.05)*blob(u,vec2(0.,-.18),vec2(.9,.35));            // faint green phosphor wash low in the tube
+      float rf=.0; vec2 dr=vec2(sin(T*.11),cos(T*.09))*.01;               // soft reflections of ceiling lights, drifting a hair
+      rf+=blob(u,vec2(-.42,.36)+dr,vec2(.09,.05))+blob(u,vec2(.1,.38)+dr,vec2(.11,.055))+.6*blob(u,vec2(-.1,.16)+dr,vec2(.07,.045));
+      rf+=.5*blob(u,vec2(-.62,.02)+dr,vec2(.04,.05))+.4*blob(u,vec2(.0,-.44)+dr,vec2(.12,.04))+.35*blob(u,vec2(-.3,-.46)+dr,vec2(.08,.035));
+      c+=vec3(.42,.43,.41)*rf;
+      vec2 e=abs(q-.5)*2.; float edge=pow(e.x,6.)+pow(e.y,6.);           // curved tube: darker toward the rim
+      c*=1.-.75*smoothstep(.15,1.,edge); c*=.97+.03*sin(T*60.);           // mains flicker
+      gl_FragColor=vec4(c,1.);}`));
+  gl.linkProgram(p); gl.useProgram(p);
+  const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(p, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const uR = gl.getUniformLocation(p, 'R'), uT = gl.getUniformLocation(p, 'T'), t0 = performance.now(); let id = 0;
+  const loop = () => { id = requestAnimationFrame(loop); const w = Math.ceil(innerWidth / 2), h = Math.ceil(innerHeight / 2); // half res, smoothly upscaled (soft glass)
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; gl.viewport(0, 0, w, h); }
+    gl.uniform2f(uR, w, h); gl.uniform1f(uT, REDUCED ? 0 : (performance.now() - t0) / 1000); gl.drawArrays(gl.TRIANGLES, 0, 3); };
+  loop(); return { stop: () => cancelAnimationFrame(id) };
+})();
+const showProg = () => { const p = Math.round(prog.a * 70 + prog.f * 15 + prog.g * 15); $('prog').textContent = p < 100 ? `loading ${p}%` : 'ready'; return p; };
+document.fonts.ready.then(() => { prog.f = 1; showProg(); });
+const t0 = performance.now();
+const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+const carReady = new Promise(res => loader.load('golfcart.glb', g => { // wheel_0..3: split out of the body mesh by vehicle.mjs --wheels
+  prepCar(g.scene); g.scene.rotation.y = Math.PI; g.scene.scale.setScalar(CAR_S); car.add(g.scene);
+  spinWheels(g.scene, /^wheel_\d/, car);
+  res();
+}, undefined, e => { console.error(e); res(); }));
+loader.load('urban.glb', g => {
+  prepCar(g.scene); g.scene.updateMatrixWorld(true);
+  const kinds = g.scene.getObjectByName('car_low_poly').children.map(o => { // one template per car: centred, wheels on y = 0, facing +X
+    const t = new THREE.Group(), m = o.clone(); m.applyMatrix4(o.parent.matrixWorld); t.add(m); t.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(m), c = b.getCenter(V3()); m.position.sub(V3(c.x, b.min.y, c.z));
+    t.rotation.y = URBAN_YAW; t.scale.setScalar(URBAN_S); return t;
+  });
+  let k = 0;
+  for (const [z, v, n] of LANES) for (let i = 0; i < n; i++) {
+    const t = new THREE.Group(); t.add(kinds[k % kinds.length].clone()); t.userData = { x: i * LOOP / n + k * 13 % 29, v }; k++;
+    t.position.z = z; if (v < 0) t.rotation.y = Math.PI; scene.add(t); traffic.push(t);
+    spinWheels(t, /^wheel_\d/, t); // wheel_0..3 split per car by vehicle.mjs --cars
+  }
+}, undefined, e => console.error(e));
+// one DeLorean ("GTA V (Mod) - DeLorean DMC 12 Time Machine" by Zorg_Sinister, CC-BY-4.0) in the overtaking lane: a single instance,
+// recycled by the lane wrap, so it passes HONK about once every 90 s. Heaviest asset (4.5 MB) → fetched only after the scene is up.
+carReady.then(() => loader.load('delorean.glb', g => { // raw: faces −Z, 4.41 m → +X, real 4.2 m
+  prepCar(g.scene); g.scene.rotation.y = -Math.PI / 2; g.scene.scale.setScalar(4.2 / 4.41);
+  const t = new THREE.Group(); t.add(g.scene); t.position.z = -3.6; t.userData = { x: 50, v: 30 }; scene.add(t); traffic.push(t); // gap between lane cars at 0 and 103
+  spinWheels(t, /^wheel_\d/, t);
+}, undefined, e => console.error(e)));
+loader.load('murphy.glb', g => { // raw: faces +X, centred on z = −12
+  prepCar(g.scene); g.scene.position.z = 12; chaser.add(g.scene);
+  spinWheels(g.scene, /^Murphy97_WheelStamp_/, chaser);
+}, undefined, e => console.error(e));
+loader.load('honk.glb?v=6', g => {
+  const m = g.scene;
+  m.traverse(o => {
+    if (o.isLight) o.visible = false;
+    if (o.isMesh) { o.frustumCulled = false; o.castShadow = true; o.receiveShadow = true; o.material.metalness = 0; o.material.roughness = .8; o.material.envMapIntensity = .8; }
+    if (o.isSkinnedMesh) addBlink(o.material);
+    if (o.isBone) bones[o.name] = o;
+  });
+  hero.remove(ph); hero.add(m);
+  mixer = new THREE.AnimationMixer(m);
+  for (const a of g.animations) ACT[a.name] = mixer.clipAction(a);
+  setClip('Idle', 0); mixer.update(0); SIT.hips = bones.Hips.position.clone();
+  carReady.then(() => { R.compile(scene, cam); prog.a = 1; prog.g = 1; loaded.honk = true; ready(); });
+}, e => { if (e.total) { prog.a = e.loaded / e.total * .95; showProg(); } }, err => { console.error(err); $('prog').textContent = 'model failed to load'; });
+
+const loaded = { honk: false, room: false };
+loader.load('tv/room.glb', g => {
+  const PLACE = { tv: [0, 0, 0, 0], sofa: [0, 0, SOFA_Z, Math.PI], table: [1.0, 0, 2.0, 0], remote: [0, 0, 0, 0] };
+  for (const o of [...g.scene.children]) {
+    const p = PLACE[o.name]; if (!p) continue;
+    const b = new THREE.Box3().setFromObject(o), w = new THREE.Group(); w.name = o.name; // re-seat on the floor, centred (quantize moved the pivot)
+    o.position.x -= (b.min.x + b.max.x) / 2; o.position.y -= b.min.y; o.position.z -= (b.min.z + b.max.z) / 2; w.add(o);
+    P[o.name] = w; w.position.set(p[0], p[1], p[2]); w.rotation.y = p[3]; room.add(w);
+    if (o.name === 'sofa') w.scale.set(.9, .85, .72); // sofa sized to HONK (short legs): seat .35 m high, .45 m deep
+    o.traverse(m => { if (m.isMesh) { m.material.metalness = 0; if (m.material.map) px(m.material.map); } });
+  }
+  if (P.pillow) P.pillow.rotation.x = -.35;
+  loaded.room = true; ready();
+}, undefined, err => { console.error(err); loaded.room = true; ready(); });
+// set dressing: 'Retro PS1 room props' by pepe (Sketchfab Standard licence); its CRT (part 0) is skipped, the room has its own TV
+// [parts, x, z, rotY, lift]: room units (TV at origin facing +Z, back wall at z = -.7, sofa at z = SOFA_Z)
+const PROPS = [[[1], -2.05, -.4, 0], [[3], 2.3, -.66, 0], [[4], .05, -.66, 0, 1.55], [[6], -1.35, -.5, .25], [[5], .72, -.05, -.3],
+  [[13, 14, 15], -.15, .55, .2], [[16, 17], -1.3, 2.95, Math.PI / 2], // its soda can (part 2) is skipped: oversized, the soda pack covers drinks
+  [[7], -1.05, -.67, 0, 1.25], [[8], -.75, -.67, 0, 1.3], [[9], .75, -.67, 0, 1.28], [[10], 1.05, -.67, 0, 1.22], [[11], -1.05, -.67, 0, .82], [[12], 1.05, -.67, 0, .8]];
+loader.load('tv/props.glb', g => {
+  g.scene.updateMatrixWorld(true); const parts = [...(g.scene.getObjectByName('GLTF_SceneRootNode')?.children || [])]; // copy: attach() empties the live array
+  for (const [ids, x, z, ry, lift = 0] of PROPS) {
+    const list = ids.map(i => parts[i]).filter(Boolean); if (!list.length) continue;
+    const b = new THREE.Box3(); list.forEach(o => b.expandByObject(o));
+    const w = new THREE.Group(); w.position.set((b.min.x + b.max.x) / 2, b.min.y, (b.min.z + b.max.z) / 2); w.updateMatrixWorld(true);
+    list.forEach(o => w.attach(o)); w.position.set(x, lift, z); w.rotation.y = ry; room.add(w);
+    w.traverse(m => { if (m.isMesh) { m.material.metalness = 0; if (m.material.map) px(m.material.map); } });
+  }
+}, undefined, err => console.error(err));
+// snacks on the coffee table (top at y ≈ .37): [file, mesh indices (null = all), size of the longest side in m, x, z, rotY]
+// PSX burger by Kasugay (Sketchfab Standard), PSX/PS1 food props by grgssblend (CC-BY-4.0), Soda pack by Pasha (CC-BY-4.0)
+const SNACKS = [['tv/psxps1_food_props__lowpoly.glb', [14], .3, .9, 1.9, .3], ['tv/psxps1_food_props__lowpoly.glb', [11], .2, .82, 2.14, -.4],
+  ['tv/psx_-_burger.glb', null, .12, 1.13, 1.86, .8], ['tv/soda_pack.glb', [9], .12, 1.16, 2.14, 0], ['tv/soda_pack.glb', [4], .12, 1.04, 2.24, 0]];
+const _sb = new THREE.Box3(), snackCache = {}, SN = []; // SN: snacks that get blown off the table by the lightning
+for (const [f, ids, size, x, z, ry] of SNACKS) (snackCache[f] ??= loader.loadAsync(f)).then(g => {
+  g.scene.updateMatrixWorld(true); const ms = []; g.scene.traverse(o => o.isMesh && ms.push(o));
+  const pick = ids ? ids.map(i => ms[i]).filter(Boolean) : ms, w = new THREE.Group(), inner = new THREE.Group(); w.add(inner);
+  for (const m of pick) { const c = new THREE.Mesh(m.geometry, m.material); m.matrixWorld.decompose(c.position, c.quaternion, c.scale); inner.add(c); c.material.metalness = 0; if (c.material.map) px(c.material.map); }
+  inner.updateMatrixWorld(true); _sb.setFromObject(inner); const sz = _sb.getSize(V3()), k = size / Math.max(sz.x, sz.y, sz.z);
+  inner.scale.setScalar(k); inner.position.set(-(_sb.min.x + _sb.max.x) / 2 * k, -_sb.min.y * k, -(_sb.min.z + _sb.max.z) / 2 * k);
+  w.position.set(x, .372, z); w.rotation.y = ry; room.add(w); SN.push(w);
+}).catch(e => console.error(e));
+let current = null;
+function setClip(name, fade = .7) {
+  const a = ACT[name]; if (!a || a === current) return;
+  a.reset().setEffectiveWeight(1).play();
+  if (current && fade > 0) current.crossFadeTo(a, fade, false); else if (current) current.stop(); // fade 0: hard cut (a 0 s crossfade never resolves under ?hold)
+  current = a;
+}
+
+/* ---------- stations: fixed shots around the car (car at origin facing +X, the world scrolls past) ---------- */
+const STATIONS = [
+  { name: 'Wide', pos: V3(9.5, 3.1, -5.2), look: V3(-.4, .95, -.3), pl: V3(0, 1.1, -.2), fov: 30, ap: .3, bloom: 1, par: .5 },
+  { name: 'About', pos: V3(1.3, 1.25, -1.65), look: V3(-.45, 1.05, -.35), lw: V3(-.45, 1.05, -.95), pl: V3(-.25, .55, -.33), fov: 38, ap: .6, bloom: .8, par: .2 },
+  { name: 'Memes', pos: V3(-8.5, 1.6, 3.4), look: V3(3, .8, 0), pl: V3(0, 1, 0), fov: 42, ap: .12, bloom: 1, par: .3 }, // launch shot; the gallery then cuts to the sky
+];
+const ST_ABOUT = 1, ST_MEMES = 2; // nav order: Home · About · Memes
+let station = clamp(parseInt(Q.get('shot') ?? '0', 10) || 0, 0, STATIONS.length - 1); // default: Wide
+// portrait: S.pl centres the subject; wide screens: S.lw shifts it left to leave room for the About card (blended in by aspect, 1.15 → 1.65)
+const lookOf = S => innerWidth < innerHeight && S.pl ? S.pl : S.lw ? S.look.clone().lerp(S.lw, clamp((innerWidth / innerHeight - 1.15) / .5, 0, 1)) : S.look;
+const camState = { pos: STATIONS[station].pos.clone(), look: lookOf(STATIONS[station]).clone(), fov: STATIONS[station].fov, roll: 0, ap: STATIONS[station].ap, bloom: STATIONS[station].bloom, par: STATIONS[station].par };
+let travel = null, lockUntil = 0;
+function go(i, instant = REDUCED) {
+  i = clamp(i, 0, STATIONS.length - 1); if (i === station && !instant) return;
+  const now = performance.now(); if (now < lockUntil) return; lockUntil = now + 800;
+  station = i; const S = STATIONS[i];
+  document.querySelectorAll('nav button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.s === i)));
+  $('live').textContent = S.name;
+  const ab = $('about'), on = i === ST_ABOUT; ab.classList.toggle('on', on); ab.setAttribute('aria-hidden', String(!on)); ab.toggleAttribute('inert', !on); // About card rides with the Window shot
+  if (GAL.on && i !== ST_MEMES) { endGallery(); instant = true; } // leaving the sky: flash straight back to the road
+  if (i === ST_MEMES) startGallery();
+  if (!instant) $('ui').classList.add('nav-used');
+  if (instant) { Object.assign(camState, { pos: S.pos.clone(), look: lookOf(S).clone(), fov: S.fov, ap: S.ap, bloom: S.bloom, par: S.par }); travel = null; return; }
+  const from = { pos: camState.pos.clone(), look: camState.look.clone(), fov: camState.fov, ap: camState.ap, bloom: camState.bloom, par: camState.par };
+  const mid = from.pos.clone().lerp(S.pos, .5); mid.y += from.pos.distanceTo(S.pos) * .22;
+  travel = { from, to: S, mid, t: 0, dur: i === ST_MEMES ? .9 : 2.6 }; // the gallery launch swings in fast
+}
+function stepTravel(dt) {
+  if (!travel) return;
+  travel.t = Math.min(1, travel.t + dt / travel.dur);
+  const k = ease(travel.t), { from, to, mid } = travel, u = 1 - k;
+  camState.pos.set(0, 0, 0).addScaledVector(from.pos, u * u).addScaledVector(mid, 2 * u * k).addScaledVector(to.pos, k * k);
+  camState.look.lerpVectors(from.look, lookOf(to), k);
+  camState.fov = lerp(from.fov, to.fov, k) + Math.sin(k * Math.PI) * 6;
+  camState.roll = Math.sin(k * Math.PI) * .05;
+  camState.ap = lerp(from.ap, to.ap, k); camState.bloom = lerp(from.bloom, to.bloom, k); camState.par = lerp(from.par, to.par, k);
+  if (travel.t >= 1) { travel = null; camState.roll = 0; }
+}
+
+/* ---------- the drive: scroll the world, wrap tiles + traffic, suspension bounce ---------- */
+function stepWorld(dt) {
+  dist += SPEED * dt;
+  roadTex.offset.x = (dist / DASH) % 1; groundTex.offset.x = (dist / 6) % 1;
+  for (const t of tiles) t.position.x = wrapX(t.userData.x0 - dist);
+  for (const t of traffic) { t.userData.x += (t.userData.v - SPEED) * dt; t.userData.d = (t.userData.d || 0) + t.userData.v * dt; t.position.x = wrapX(t.userData.x); } // d: distance rolled at its own speed
+  car.userData.d = chaser.userData.d = dist;
+  chaser.position.x = -(7.5 + Math.sin(clock * .21) * 1.6 + Math.sin(clock * .67) * .4); // looms right behind: centre gap 5.5–9.5 m (bumpers ~1–5 m)
+  chaser.position.z = Math.sin(clock * .43) * .9 + Math.sin(clock * 1.1) * .25; // weaves in the lane
+  chaser.rotation.y = -(Math.cos(clock * .43) * .39 + Math.cos(clock * 1.1) * .28) / SPEED; // nose follows the weave
+  const ph = clock * 2.6 % 1; LIGHTBAR[0].visible = ph < .5 && ph % .25 < .17; LIGHTBAR[1].visible = ph >= .5 && ph % .25 < .17; // double flash, alternating
+  for (const [n, q0, ax, r, veh] of SPIN) n.quaternion.setFromAxisAngle(ax, veh.userData.d / r).multiply(q0);
+  const b = REDUCED ? 0 : 1;
+  car.position.y = (Math.sin(clock * 11.3) * .5 + Math.sin(clock * 17.9 + 1) * .3 + Math.sin(clock * 2.1) * .6) * .006 * b;
+  car.rotation.z = Math.sin(clock * 1.7) * .004 * b; car.rotation.x = Math.sin(clock * 2.3 + .5) * .003 * b;
+  wheel.rotation.x = Math.sin(clock * .5) * .06 + Math.sin(clock * 1.3) * .02; // small steering corrections (hands follow via IK)
+  sky.position.copy(cam.position);
+}
+
+/* ---------- MEME GALLERY: jet boost off the road → sky with low-poly clouds → item-viewer carousel ----------
+   Timeline (GAL.t, seconds): 0 camera swings behind the car, flames light · .6–2.2 boost: the car leaves the cruiser and the frame
+   2.2 flash → sky · 2.2–3.8 the car climbs through the clouds to centre · 4.4–5.2 it eases to the right third, the carousel appears (left). */
+// Meme list (memes/*.webp, 896 px, from the user's HONKS/illus set). Caption reads: "It's {a} {name}. {ask}" with the name in green.
+const MEMES = [
+  ['01-hood-slide', 'a', 'Hood Slide', 'Late for the 9 a.m.?'],
+  ['02-getaway', 'the', 'Getaway Commute', 'Is that a deadline behind you?'],
+  ['03-payphone', 'a', 'Payphone Pitch', 'Pick up, it might be the boss?'],
+  ['04-canal', 'a', 'Canal View', 'Thinking about Q4?'],
+  ['05-bag-check', 'a', 'Bag Check', 'Lunch is in here somewhere?'],
+  ['06-home-video', 'a', 'Home Video', 'Roll the tape?'],
+  ['07-wrong-way', 'the', 'Wrong Way', 'Left, he says?'],
+  ['08-rooftop', 'a', 'Rooftop Break', 'Five more minutes?'],
+  ['09-red-rocket', 'the', 'Red Rocket', 'Express delivery?'],
+  ['10-office-hours', '', 'Office Hours', 'Do not disturb?'],
+  ['11-night-stroll', 'a', 'Night Stroll', 'Taxi or legs?'],
+  ['12-supply-run', 'a', 'Supply Run', 'Got the snacks?'],
+  ['13-bull-market', 'a', 'Bull Market', 'Buy high, neigh low?'],
+  ['14-work-from-bed', '', 'Work From Bed', 'Camera off?'],
+  ['15-parking-duty', '', 'Parking Duty', 'Guarding the good spot?'],
+].map(([f, a, name, ask]) => ({ src: `memes/${f}.webp`, a, name, ask }));
+const GAL = { on: false, t: 0, sky: false, idx: 0, from: -1, slide: 1, dir: 1, ui: 0, yaw: 0, yaw0: 0, side: 0, hov: 0 };
+const ROAD = [road, ground, ...tiles]; // + traffic + chaser, hidden in the sky
+const texLoader = new THREE.TextureLoader(), memeTex = [];
+function memeMap(i) { // loaded on first view (the gallery stays out of the page's initial download), neighbours prefetched
+  for (const j of [i, (i + 1) % MEMES.length, (i + MEMES.length - 1) % MEMES.length]) if (!memeTex[j]) {
+    const t = memeTex[j] = texLoader.load(MEMES[j].src); t.colorSpace = THREE.SRGBColorSpace; t.magFilter = THREE.NearestFilter; t.anisotropy = 1;
+  }
+  return memeTex[i];
+}
+const CARD_W = 1.15, CARD_H = 1.15, cardBack = new THREE.MeshStandardMaterial({ color: 0x23252b, roughness: .6, metalness: .3 });
+const card = (() => { // one card, a meme on each face: next/prev loads the hidden face and spins 180° about Y (PS1 inventory turn)
+  const faces = [0, 1].map(() => new THREE.MeshBasicMaterial({ fog: false })) /* unlit: the meme shows its own colours */, m = new THREE.Mesh(box(CARD_W, CARD_H, .04), [cardBack, cardBack, cardBack, cardBack, ...faces]);
+  m.visible = false; m.userData.faces = faces; scene.add(m); return m;
+})();
+const arrowMat = new THREE.MeshStandardMaterial({ color: 0xdfe4ea, metalness: .9, roughness: .28, flatShading: true });
+const arrows = [-1, 1].map(s => { const m = new THREE.Mesh(new THREE.ConeGeometry(.13, .32, 4).rotateZ(-s * Math.PI / 2), arrowMat); m.visible = false; scene.add(m); return m; }); // chunky silver pointers
+// jet flames out of the Golf Car's exhaust (rear left, measured on golfcart_raw.glb), two tips side by side: per tip an orange outer cone + blue-white core
+const NOZ = [V3(-1.9, .232, -.47), V3(-1.9, .232, -.58)];
+const FLAME = NOZ.flatMap(p => [[.22, 2.2, [3, 1.3, .35], false], [.1, 1.1, [2.2, 2.6, 4], true]].map(([r, h, c, core]) => {
+  const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7).rotateZ(Math.PI / 2).translate(-h / 2, 0, 0), new THREE.MeshBasicMaterial({ transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  m.material.color.setRGB(...c); m.position.copy(p); m.scale.setScalar(.001); m.userData = { core, L: 1, V: 0, T: 1, tt: 0 }; car.add(m); return m;
+}));
+// sky: soft cumulus. Every cloud is a cluster of camera-facing puff billboards (flat-ish base, domed top, lit on top, blue-grey
+// underneath). All puffs are one instanced draw call, re-sorted back-to-front each frame; they stream past at flight speed (parallax
+// comes from depth) and fade at the wrap edges so nothing pops.
+const CLOUDS = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'); seed = 909;
+  for (let i = 0; i < 10; i++) { // lumpy soft puff: overlapping radial blobs
+    const px = 64 + (rnd() - .5) * 44, py = 66 + (rnd() - .5) * 30, r = 24 + rnd() * 32, g = x.createRadialGradient(px, py, 0, px, py, r);
+    g.addColorStop(0, 'rgba(255,255,255,.5)'); g.addColorStop(.55, 'rgba(255,255,255,.22)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  }
+  const tex = new THREE.CanvasTexture(c), P = []; seed = 5150;
+  const cloud = (cx, cy, cz, w) => { for (let i = 0, n = 9 + (rnd() * 8 | 0); i < n; i++) { const u = rnd() * 2 - 1, h = rnd(); P.push({ x: cx + u * w, y: cy + h * w * .42 * (1 - u * u * .6), z: cz + (rnd() - .5) * w * .5, s: w * (.5 + rnd() * .35) * (1 - Math.abs(u) * .35), b: .7 + .3 * h }); } };
+  for (let i = 0; i < 40; i++) { // both sides of the flight path, a clear corridor around the car and camera
+    const side = rnd() < .5 ? -1 : 1, z = side * (7 + Math.pow(rnd(), .7) * 60), far = Math.abs(z) / 67;
+    let y = -16 + rnd() * 30; if (Math.abs(z) < 16 && y > -6 && y < 7) y = rnd() < .5 ? -6 - rnd() * 6 : 7 + rnd() * 5;
+    cloud((rnd() - .5) * 220, y, z, 3.5 + far * 9 + rnd() * 3);
+  }
+  const n = P.length, g = new THREE.InstancedBufferGeometry(); g.copy(new THREE.PlaneGeometry(1, 1)); g.instanceCount = n;
+  const aPos = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3), aSize = new THREE.InstancedBufferAttribute(new Float32Array(n), 1), aCol = new THREE.InstancedBufferAttribute(new Float32Array(n * 2), 2);
+  for (const a of [aPos, aSize, aCol]) a.setUsage(THREE.DynamicDrawUsage);
+  g.setAttribute('iPos', aPos); g.setAttribute('iSize', aSize); g.setAttribute('iCol', aCol);
+  const mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, uniforms: { map: { value: tex }, uShade: { value: new THREE.Color(0x7889a8) }, uLit: { value: new THREE.Color(0xffffff) } },
+    vertexShader: `attribute vec3 iPos;attribute float iSize;attribute vec2 iCol;varying vec2 vUv,vCol;
+      void main(){vUv=uv;vCol=iCol;vec4 mv=modelViewMatrix*vec4(iPos,1.);mv.xy+=position.xy*iSize;gl_Position=projectionMatrix*mv;}`,
+    fragmentShader: `uniform sampler2D map;uniform vec3 uShade,uLit;varying vec2 vUv,vCol;
+      void main(){float a=texture2D(map,vUv).a*vCol.y;if(a<.01)discard;gl_FragColor=vec4(mix(uShade,uLit,clamp(vCol.x*(.72+.45*vUv.y),0.,1.)),a);}`,
+  }));
+  mesh.frustumCulled = false; mesh.visible = false; scene.add(mesh);
+  const order = P.map((_, i) => i), depth = new Float32Array(n), cx = new Float32Array(n), cy = new Float32Array(n), cz = new Float32Array(n), _f = V3();
+  mesh.userData.step = (shift, lift) => { // shift: metres flown (clouds move −X), lift: vertical offset while climbing
+    cam.getWorldDirection(_f);
+    for (let i = 0; i < n; i++) { const p = P[i]; cx[i] = ((p.x - shift + 110) % 220 + 220) % 220 - 110; cy[i] = p.y + lift; cz[i] = p.z; depth[i] = (cx[i] - cam.position.x) * _f.x + (cy[i] - cam.position.y) * _f.y + (cz[i] - cam.position.z) * _f.z; }
+    order.sort((a, b) => depth[b] - depth[a]); // far first
+    for (let k = 0; k < n; k++) { const i = order[k], p = P[i], edge = Math.min(1, (110 - Math.abs(cx[i])) / 18); aPos.setXYZ(k, cx[i], cy[i], cz[i]); aSize.setX(k, p.s); aCol.setXY(k, p.b, .92 * Math.max(0, edge)); }
+    aPos.needsUpdate = aSize.needsUpdate = aCol.needsUpdate = true;
+  };
+  return mesh;
+})();
+// NOS burn: particle flame (white-blue at the nozzle → orange → red, additive) + a rocket-style smoke trail (billowing, lingering,
+// sorted) + a flickering orange light. Each system is one instanced draw call of camera-facing quads.
+function billboards(n, tex, additive, stretch = 0) {
+  const g = new THREE.InstancedBufferGeometry(); g.copy(new THREE.PlaneGeometry(1, 1)); g.instanceCount = 0;
+  const pos = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3), sr = new THREE.InstancedBufferAttribute(new Float32Array(n * 2), 2), col = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4), vel = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+  for (const a of [pos, sr, col, vel]) a.setUsage(THREE.DynamicDrawUsage);
+  g.setAttribute('iPos', pos); g.setAttribute('iSR', sr); g.setAttribute('iCol', col); g.setAttribute('iVel', vel);
+  const m = new THREE.Mesh(g, new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, uniforms: { map: { value: tex }, uStretch: { value: stretch } },
+    vertexShader: `attribute vec3 iPos,iVel;attribute vec2 iSR;attribute vec4 iCol;uniform float uStretch;varying vec2 vUv;varying vec4 vCol;
+      void main(){vUv=uv;vCol=iCol;vec4 mv=modelViewMatrix*vec4(iPos,1.);vec2 q=position.xy*iSR.x;
+        vec2 v=(modelViewMatrix*vec4(iVel,0.)).xy;float l=length(v);
+        if(uStretch>0.&&l>1e-3){vec2 d=v/l;q=d*q.x*(1.+l*uStretch)+vec2(-d.y,d.x)*q.y;} /* smear along the motion */
+        else{float c=cos(iSR.y),s=sin(iSR.y);q=mat2(c,s,-s,c)*q;}
+        mv.xy+=q;gl_Position=projectionMatrix*mv;}`,
+    fragmentShader: `uniform sampler2D map;varying vec2 vUv;varying vec4 vCol;void main(){float a=texture2D(map,vUv).a*vCol.a;if(a<.004)discard;gl_FragColor=vec4(vCol.rgb,a);}`,
+  }));
+  m.frustumCulled = false; scene.add(m);
+  return { m, n, pos, sr, col, vel, P: [] };
+}
+const softTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(.35, 'rgba(255,255,255,.6)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
+const FIRE = billboards(150, softTex, true, .03), SPARK = billboards(140, softTex, true, .16), SMOKE = billboards(220, CLOUDS.material.uniforms.map.value, false, .09); // smoke reuses the lumpy cloud puff
+FIRE.m.renderOrder = SPARK.m.renderOrder = 2; // additive glow drawn over the smoke, not buried in it
+const NOS_LIGHT = new THREE.PointLight(0xff8a3a, 0, 9, 2); NOS_LIGHT.position.set(-2.3, .3, -.52); car.add(NOS_LIGHT);
+const NZW = [V3(), V3()], _nb = V3(), _cv = V3(), _cp = V3(), _cf = V3(); let fireAcc = 0, smokeAcc = 0, sparkAcc = 0;
+function nosClear() { FIRE.P.length = SMOKE.P.length = SPARK.P.length = 0; FIRE.m.geometry.instanceCount = SMOKE.m.geometry.instanceCount = SPARK.m.geometry.instanceCount = 0; NOS_LIGHT.intensity = 0; }
+function stepNos(dt, burn, air) { // burn 0..1, air: world x-velocity of the surrounding air (the road scrolls, the sky streams)
+  if (dt <= 0) return;
+  NOZ.forEach((p, i) => car.localToWorld(NZW[i].copy(p))); _nb.set(-1, 0, 0).applyQuaternion(car.quaternion); // both tips + exhaust direction (sky: angled down, the trail streams under the car)
+  car.getWorldPosition(_cp); _cv.subVectors(_cp, car.userData.lastP ?? _cp).divideScalar(dt); car.userData.lastP = _cp.clone(); // car velocity
+  if (burn > .05) {
+    for (fireAcc += dt * 440 * burn; fireAcc >= 1 && FIRE.P.length < FIRE.n; fireAcc--) { const _nz = NZW[FIRE.P.length & 1]; FIRE.P.push({
+      x: _nz.x, y: _nz.y + (Math.random() - .5) * .04, z: _nz.z + (Math.random() - .5) * .04, life: .1 + Math.random() * .12, age: Math.random() * .02,
+      vx: _cv.x + _nb.x * (24 + Math.random() * 12) * (GAL.sky ? .6 : 1) + (Math.random() - .5) * 2, vy: _cv.y + (Math.random() - .5) * 1.5, vz: _cv.z + _nb.z * 24 + (Math.random() - .5) * 2, r: Math.random() * 6 }); }
+    for (sparkAcc += dt * 95 * burn; sparkAcc >= 1 && SPARK.P.length < SPARK.n; sparkAcc--) { const _nz = NZW[SPARK.P.length & 1], sp = 8 + Math.random() * 14; SPARK.P.push({ // embers flung out of the exhaust, falling
+      x: _nz.x, y: _nz.y, z: _nz.z, life: .3 + Math.random() * .4, age: 0, s: .1 + Math.random() * .06, /* big enough to survive the low-res PS2 buffer */
+      vx: _cv.x + _nb.x * sp, vy: _cv.y + (Math.random() - .3) * 4, vz: _cv.z + _nb.z * sp + (Math.random() - .5) * 6 }); }
+    for (smokeAcc += dt * 85 * burn; smokeAcc >= 1 && SMOKE.P.length < SMOKE.n; smokeAcc--) { const _nz = NZW[SMOKE.P.length & 1]; SMOKE.P.push({
+      x: _nz.x + _nb.x * 1.1, y: _nz.y, z: _nz.z + _nb.z * 1.1, life: GAL.sky ? 1.2 + Math.random() * .6 : 2 + Math.random() * 1.2, age: 0,
+      vx: _cv.x + _nb.x * 14, vy: _cv.y + Math.random() * .6, vz: _cv.z + (Math.random() - .5) * 1.4, r: Math.random() * 6, vr: (Math.random() - .5) * .8, s1: (2.6 + Math.random() * 1.6) * (GAL.sky ? .5 : 1) }); }
+  }
+  NOS_LIGHT.intensity = burn * (10 + Math.random() * 8);
+  const sys = (S, upd) => { S.P = S.P.filter(p => (p.age += dt) < p.life); for (const p of S.P) { p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; } return S.P; };
+  // flame: hot core, cooling as it leaves the nozzle
+  const F = sys(FIRE); F.forEach((p, k) => { const u = p.age / p.life, s = .28 + .5 * Math.sin(Math.min(1, u * 1.3) * Math.PI) + .15 * u;
+    const [r, g, b] = u < .25 ? [2.6, 2.6, 3.4] : u < .6 ? [3, 1.45, .45] : [1.8, .45, .12];
+    FIRE.pos.setXYZ(k, p.x, p.y, p.z); const sk = GAL.sky ? .45 : 1; FIRE.sr.setXY(k, s * (GAL.sky ? .5 : 1), p.r); FIRE.col.setXYZW(k, r * sk, g * sk, b * sk, (1 - u) * .9 * (GAL.sky ? clamp((p.x - cam.position.x - 2) / 3, 0, 1) : 1)); FIRE.vel.setXYZ(k, p.vx - _cv.x, p.vy - _cv.y, p.vz - _cv.z); }); // smear by motion relative to the car (the camera rides along)
+  FIRE.m.geometry.instanceCount = F.length; FIRE.pos.needsUpdate = FIRE.sr.needsUpdate = FIRE.col.needsUpdate = FIRE.vel.needsUpdate = true;
+  // sparks: gravity, white-hot → orange, thin streaks
+  const K = sys(SPARK); K.forEach((p, k) => { p.vy -= 9.8 * dt; const u = p.age / p.life, h = Math.max(0, 1 - u * 2.5);
+    SPARK.pos.setXYZ(k, p.x, p.y, p.z); SPARK.sr.setXY(k, p.s, 0); SPARK.col.setXYZW(k, 3 + h, 1.3 + 1.7 * h, .35 + 1.3 * h, 1 - u * u); SPARK.vel.setXYZ(k, p.vx - _cv.x, p.vy - _cv.y, p.vz - _cv.z); });
+  SPARK.m.geometry.instanceCount = K.length; SPARK.pos.needsUpdate = SPARK.sr.needsUpdate = SPARK.col.needsUpdate = SPARK.vel.needsUpdate = true;
+  // smoke: slows into the air, billows wider, drifts up, fades; warm-lit while young
+  SMOKE.m.material.uniforms.map.value = GAL.sky ? softTex : CLOUDS.material.uniforms.map.value;
+  const S = sys(SMOKE); for (const p of S) { const d = Math.min(1, dt * 1.8); p.vx += (air - p.vx) * d; p.vz *= 1 - d * .5; p.vy += (GAL.sky ? .5 : .35) * dt; p.r += p.vr * dt; }
+  cam.getWorldDirection(_cf); S.sort((a, b) => ((b.x - cam.position.x) * _cf.x + (b.y - cam.position.y) * _cf.y + (b.z - cam.position.z) * _cf.z) - ((a.x - cam.position.x) * _cf.x + (a.y - cam.position.y) * _cf.y + (a.z - cam.position.z) * _cf.z));
+  S.forEach((p, k) => { const u = p.age / p.life, s = .7 + (p.s1 - .7) * Math.pow(u, .4), w = Math.max(0, 1 - u * 5);
+    SMOKE.pos.setXYZ(k, p.x, p.y, p.z); SMOKE.sr.setXY(k, s, p.r);
+    const near = GAL.sky ? clamp((Math.hypot(p.x - cam.position.x, p.y - cam.position.y, p.z - cam.position.z) - 3.5) / 3, 0, 1) : 1; // sky: fade before a puff reaches the lens
+    SMOKE.col.setXYZW(k, .86 + .3 * w, .87 + .05 * w, .9 - .3 * w, Math.min(1, u * 30) * Math.pow(1 - u, 1.3) * .8 * near);
+    if (GAL.sky) SMOKE.vel.setXYZ(k, p.vx - _cv.x, p.vy - _cv.y, p.vz - _cv.z); else SMOKE.vel.setXYZ(k, 0, 0, 0); }); // sky: smeared along the airflow
+  SMOKE.m.geometry.instanceCount = S.length; SMOKE.pos.needsUpdate = SMOKE.sr.needsUpdate = SMOKE.col.needsUpdate = SMOKE.vel.needsUpdate = true;
+}
+const SKY_HAZE = new THREE.Color(0x6f9fd8); // gallery sky horizon (the road uses FOG)
+const SKY_CAM = { pos: V3(-6.2, 3.4, -.6), look: V3(2, .9, 0), fov: 42 }; // high chase: the car flies away, its jet trails back past the lens
+const _gx = V3(), _gy = V3(), _gz = V3(), _gp = V3(), _gq = new THREE.Quaternion(), _ge = new THREE.Euler();
+function galFlash() { const f = $('flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
+function startGallery() { Object.assign(GAL, { on: true, t: 0, sky: false, ui: 0, fly: 0 }); galCaption(); nosSound(true); }
+function galCaption() { $('galLive').textContent = `Meme ${GAL.idx + 1} of ${MEMES.length}: ${MEMES[GAL.idx].name}`; } // screen readers only (the on-screen caption was removed)
+function endGallery() { // back to the road: everything where the drive expects it
+  $('galImg').classList.remove('on'); GAL.hov = 0; nosSound(false);
+  if (!GAL.on) return; const wasSky = GAL.sky; Object.assign(GAL, { on: false, sky: false, ui: 0 });
+  if (wasSky) galFlash();
+  for (const o of [...ROAD, ...traffic, chaser]) o.visible = true; CLOUDS.visible = false; sky.material.uniforms.uFog.value = FOG;
+  car.position.set(0, 0, 0); car.rotation.set(0, 0, 0); FLAME.forEach(f => f.scale.setScalar(.001)); nosClear(); delete car.userData.lastP;
+  card.visible = false; arrows.forEach(a => { a.visible = false; }); setGalUI(false);
+}
+function setGalUI(on) { const g = $('gal'); g.classList.toggle('on', on); g.setAttribute('aria-hidden', String(!on)); g.toggleAttribute('inert', !on); }
+function showMeme(dir) { // dir: −1 previous, +1 next
+  if (!GAL.sky || GAL.slide < 1) return;
+  GAL.from = GAL.idx; GAL.idx = (GAL.idx + dir + MEMES.length) % MEMES.length; GAL.dir = dir; GAL.slide = 0;
+  GAL.side ^= 1; const f = card.userData.faces[GAL.side]; f.map = memeMap(GAL.idx); f.needsUpdate = true; // the face turned away from us gets the next meme
+  GAL.yaw0 = GAL.yaw; GAL.yaw += dir * Math.PI; // …then the card turns it towards us
+  galCaption();
+}
+function stepGallery(dt) {
+  if (!GAL.on) return;
+  GAL.t += dt; const t = GAL.t;
+  // flames + smoke
+  const fl = clamp(t / .4, 0, 1) * (GAL.sky && t > 5 ? .8 : 1);
+  FLAME.forEach((f, i) => { const u = f.userData, h = Math.min(dt, .05); // elastic: each cone's length is an underdamped spring kicked to a new target every few frames
+    if ((u.tt -= dt) <= 0) { u.tt = .05 + Math.random() * .08; u.T = .7 + Math.random() * .7; }
+    u.V += (180 * (u.T - u.L) - 8 * u.V) * h; u.L = Math.max(.3, u.L + u.V * h);
+    const k = fl * (u.core ? 1 : .55), w = k / Math.sqrt(u.L), sw = Math.sin(clock * (u.core ? 29 : 21) + i * 1.7) * .07;
+    f.scale.set(k * u.L, w, w); f.rotation.set(0, sw, sw * .8); });
+  if (SND.nos && SND.ctx) SND.nos.gain.setTargetAtTime(fl * (GAL.sky ? .45 : 1) * NOS_VOL, SND.ctx.currentTime, .1); // quieter rumble once up in the clouds
+  stepNos(dt, fl, GAL.sky ? -11 : -SPEED); // sky: the trail lags the airflow so it billows behind the car instead of vanishing behind the carousel
+  if (!GAL.sky) { // boost: the car pulls away from the cruiser and out of the frame
+    const b = clamp((t - .6) / 1.6, 0, 1);
+    car.position.x = 46 * Math.pow(b, 2.2); car.rotation.z = .05 * Math.sin(Math.min(b, 1) * Math.PI); // nose lifts a touch on launch
+    chaser.position.x -= 30 * b * b; // falls behind fast
+    if (t >= 2.2) { // whoosh to the sky
+      GAL.sky = true; galFlash(); travel = null;
+      for (const o of [...ROAD, ...traffic, chaser]) o.visible = false; CLOUDS.visible = true; sky.material.uniforms.uFog.value = SKY_HAZE; // bluer horizon up here
+      Object.assign(camState, { pos: SKY_CAM.pos.clone(), look: SKY_CAM.look.clone(), fov: SKY_CAM.fov, ap: 0, bloom: 1, par: .25, roll: 0 });
+      nosClear(); delete car.userData.lastP; // road smoke stays on the road
+    }
+    return;
+  }
+  // sky: climb to centre, hover, then ease to the right third while the carousel slides in on the left
+  const st = t - 2.2, rise = 1 - Math.pow(1 - clamp(st / 1.6, 0, 1), 3), side = ease(clamp((st - 2.2) / .8, 0, 1));
+  cam.updateMatrixWorld(); _gx.setFromMatrixColumn(cam.matrixWorld, 0); _gy.setFromMatrixColumn(cam.matrixWorld, 1); _gz.setFromMatrixColumn(cam.matrixWorld, 2).negate();
+  const portrait = cam.aspect < 1, dCar = SKY_CAM.pos.distanceTo(SKY_CAM.look), halfH = dCar * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)), halfW = halfH * cam.aspect;
+  _gp.copy(SKY_CAM.look).addScaledVector(portrait ? _gy : _gx, side * (portrait ? halfH * .42 : halfW * .45));
+  car.position.copy(_gp).addScaledVector(_gy, (1 - rise) * -14); car.position.y += Math.sin(clock * 1.6) * .14 * rise; car.position.x += Math.sin(clock * .55) * .35 * rise; // bob + surge
+  car.rotation.set(Math.sin(clock * 1.1) * .06 * rise, 0, .55 * (1 - rise) + .07 + Math.sin(clock * 1.3) * .035); // bank + pitch
+  GAL.fly += 34 * dt; CLOUDS.userData.step(GAL.fly, 22 * (1 - rise)); // clouds stream past at flight speed; they sink while the car climbs
+  // carousel (camera-anchored, left; centre-bottom in portrait)
+  GAL.ui = clamp((st - 2.4) / .5, 0, 1); if (GAL.ui > 0 && !$('gal').classList.contains('on')) setGalUI(true);
+  const D = 3.2, hH = D * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)), hW = hH * cam.aspect, sc = (portrait ? hH * .5 : hH * .86) / CARD_H;
+  const cx = portrait ? 0 : -hW * .42 - (1 - ease(GAL.ui)) * hW, cy = portrait ? -hH * .2 : hH * .04;
+  GAL.slide = Math.min(1, GAL.slide + dt / .6); const sk = ease(GAL.slide), pop = Math.sin(GAL.slide * Math.PI);
+  card.visible = GAL.ui > 0;
+  if (card.visible) {
+    const f0 = card.userData.faces[GAL.side]; if (!f0.map) { f0.map = memeMap(GAL.idx); f0.needsUpdate = true; }
+    card.position.copy(cam.position).addScaledVector(_gz, D).addScaledVector(_gx, cx).addScaledVector(_gy, cy + pop * .06 * sc);
+    const calm = 1 - GAL.hov; // hovered: stop rocking and face the viewer
+    card.quaternion.copy(cam.quaternion).multiply(_gq.setFromEuler(_ge.set(Math.sin(clock * .7) * .1 * calm, lerp(GAL.yaw0, GAL.yaw, sk) + Math.sin(clock * .9) * .55 * (1 - pop) * calm, Math.sin(clock * .6) * .1 * calm))); // spin + idle rock
+    card.scale.setScalar(sc * (1 - .08 * pop));
+  }
+  { // crisp view on hover / tap: an <img> over the card's screen rect, outside the low-res PS2 pipeline
+    const c = _gp.copy(cam.position).addScaledVector(_gz, D).addScaledVector(_gx, cx).addScaledVector(_gy, cy).project(cam);
+    const w = CARD_W * sc / (2 * hW), h = CARD_H * sc / (2 * hH); // half extents in NDC
+    const over = card.visible && ptr.seen && GAL.slide >= 1 && Math.abs(ptr.x - c.x) < w && Math.abs(-ptr.y - c.y) < h;
+    GAL.hov = lerp(GAL.hov, over ? 1 : 0, dt > 0 ? 1 - Math.exp(-dt * 10) : 1);
+    const img = $('galImg'); if (img.dataset.i !== String(GAL.idx)) { img.src = MEMES[GAL.idx].src; img.alt = MEMES[GAL.idx].name; img.dataset.i = GAL.idx; }
+    img.style.left = `${(c.x - w + 1) / 2 * 100}%`; img.style.top = `${(1 - c.y - h) / 2 * 100}%`; img.style.width = `${w * 100}%`; img.style.height = `${h * 100}%`;
+    img.classList.toggle('on', GAL.hov > .6); cvs.style.cursor = over ? 'zoom-in' : '';
+  }
+  arrows.forEach((a, i) => {
+    const s = i ? 1 : -1; a.visible = GAL.ui > 0;
+    a.position.copy(cam.position).addScaledVector(_gz, D).addScaledVector(_gx, cx + s * (CARD_W * sc * .5 + .32 * sc + Math.sin(clock * 3) * .03 * sc)).addScaledVector(_gy, cy);
+    a.quaternion.copy(cam.quaternion).multiply(_gq.setFromAxisAngle(_gx.set(1, 0, 0), clock * 1.5)); _gx.setFromMatrixColumn(cam.matrixWorld, 0); a.scale.setScalar(sc);
+    const p = _gp.copy(a.position).project(cam), btn = $(i ? 'galNext' : 'galPrev'); btn.style.left = `${(p.x + 1) / 2 * 100}%`; btn.style.top = `${(1 - p.y) / 2 * 100}%`;
+  });
+}
+
+/* ---------- seated pose: pinned hips, legs to the pedals, hands on the wheel (two-bone IK on top of Idle) ---------- */
+const SIT = { hips: null };
+const _ia = V3(), _ib = V3(), _ic = V3(), _it = V3(), _ie = V3(), _ip = V3(), _iu = V3(), _iv = V3(), _iq = new THREE.Quaternion();
+const LAT = V3(0, 0, 1), _sa = V3(), _st = V3(), _sp = V3(), _so = V3();
+function rotateWorldQ(bone, q) { bone.parent.getWorldQuaternion(_pq); bone.quaternion.premultiply(_pq.clone().invert().multiply(q).multiply(_pq)); bone.updateMatrixWorld(true); }
+function ik2(up, lo, end, target, pole) {
+  up.getWorldPosition(_ia); lo.getWorldPosition(_ib); end.getWorldPosition(_ic);
+  const l1 = _ia.distanceTo(_ib), l2 = _ib.distanceTo(_ic);
+  _it.subVectors(target, _ia); const d = clamp(_it.length(), .05, (l1 + l2) * .999); _it.normalize();
+  const ca = clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1), sa = Math.sqrt(1 - ca * ca);
+  _ip.subVectors(pole, _ia); _ip.addScaledVector(_it, -_ip.dot(_it)).normalize();
+  _ie.copy(_ia).addScaledVector(_it, ca * l1).addScaledVector(_ip, sa * l1);
+  rotateWorldQ(up, _iq.setFromUnitVectors(_iu.subVectors(_ib, _ia).normalize(), _iv.subVectors(_ie, _ia).normalize()));
+  lo.getWorldPosition(_ib); end.getWorldPosition(_ic);
+  rotateWorldQ(lo, _iq.setFromUnitVectors(_iu.subVectors(_ic, _ib).normalize(), _iv.subVectors(target, _ib).normalize()));
+}
+// hover (or tap) on HONK's head → he leans out of the driver's window. Hit test uses the seated head position, so it doesn't flicker.
+const POP = { k: 0, seat: null }, _hn = V3(), FWD = V3(1, 0, 0);
+function stepPop(dt) {
+  if (!POP.seat) return 0;
+  car.localToWorld(_hn.copy(POP.seat)).project(cam);
+  const over = started && ptr.seen && !travel && !GAL.on && _hn.z < 1 && Math.hypot((_hn.x - ptr.x) * cam.aspect, _hn.y + ptr.y) < .3;
+  cvs.style.cursor = over ? 'pointer' : '';
+  POP.k = lerp(POP.k, over ? 1 : 0, dt > 0 ? 1 - Math.exp(-dt * 5) : 1);
+  return ease(POP.k);
+}
+function sit(dt) {
+  if (!bones.Hips || !SIT.hips) return;
+  const k = stepPop(dt);
+  hero.position.copy(HERO_P).add(_so.set(.04 * k, .13 * k, -.16 * k)); // half stands up and slides toward his window
+  bones.Hips.position.copy(SIT.hips);
+  car.updateMatrixWorld(true);
+  rotateWorld(bones.Spine, LAT, .1); hero.updateMatrixWorld(true); // lean back into the seat
+  if (k > .001) for (const [n, a] of [['Spine01', -.32], ['Spine02', -.3], ['neck', -.45], ['Head', .62]]) { rotateWorld(bones[n], FWD, a * k); bones[n].updateMatrixWorld(true); } // roll out of the window (−Z), head stays upright
+  if (!POP.seat) POP.seat = car.worldToLocal(bones.Head.getWorldPosition(V3())); // hover target = seated head
+  for (const [n, s] of [['Left', -1], ['Right', 1]]) {
+    bones[n + 'UpLeg'].getWorldPosition(_sa);
+    ik2(bones[n + 'UpLeg'], bones[n + 'Leg'], bones[n + 'Foot'], _st.copy(_sa).add(_so.set(.62, -.2, s * .05).multiplyScalar(HERO_S)), _sp.copy(_sa).add(_so.set(.6, .6, s * .1)));
+  }
+  for (const [n, s, i] of [['Left', -1, 0], ['Right', 1, 1]]) {
+    wheel.localToWorld(_st.copy(WRIST[i]));
+    bones[n + 'Arm'].getWorldPosition(_sa);
+    ik2(bones[n + 'Arm'], bones[n + 'ForeArm'], bones[n + 'Hand'], _st, _sp.copy(_sa).add(_so.set(.05, -.5, s * .4)));
+  }
+}
+
+/* ---------- TV intro (own scene): honktv.mp4 full screen → pull back, HONK on the sofa → ENTER → remote click → sucked into the CRT ---------- */
+// room units: metres, TV at the origin facing +Z, sofa at z = SOFA_Z facing the TV. Props: Meshy (tv/room.glb), room textures: Meshy flare, all low-res + nearest = PS2 look
+const room = new THREE.Scene();
+const HERO0 = { p: hero.position.clone(), q: hero.quaternion.clone(), s: hero.scale.clone() }, PIV = V3(0, .95, 0), Y1 = V3(0, 1, 0), _pv = V3(); // his seat in the car, restored after the intro
+room.background = new THREE.Color(0x000000); room.fog = new THREE.Fog(0x000000, 4.8, 8.5); // the room dissolves into darkness
+room.environment = scene.environment; room.environmentIntensity = .35;
+const SOFA_Z = 3.0, SEAT = V3(.36, -.16, SOFA_Z + .03); // hero root while seated (Meshy sit clips carry the hip height)
+// screen rect on the CRT (measured on tv/room.glb; re-measure if the TV model is rebuilt)
+const SCR = { y: .665, z: .212, w: .52, h: .34 };
+const tvv = $('tvv'), vidTex = new THREE.VideoTexture(tvv); vidTex.colorSpace = THREE.SRGBColorSpace;
+const scrU = { uAsp: { value: 1.7778 }, uLive: { value: 0 }, tV: { value: vidTex }, uT: { value: 0 }, uRip: { value: 0 }, uStat: { value: 0 }, uOn: { value: 1 }, uFlash: { value: 0 } };
+const screen = new THREE.Mesh(new THREE.PlaneGeometry(SCR.w, SCR.h, 24, 18), new THREE.ShaderMaterial({
+  uniforms: scrU, fog: false,
+  vertexShader: `uniform float uRip,uT;varying vec2 vUv;void main(){vUv=uv;vec3 p=position;float r=length(p.xy);p.z+=sin(r*60.-uT*18.)*.012*uRip*exp(-r*3.);gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);}`,
+  fragmentShader: `uniform sampler2D tV;uniform float uT,uRip,uStat,uOn,uFlash,uAsp,uLive;varying vec2 vUv;
+    float h(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
+    void main(){
+      vec2 d=vUv-.5;float r=length(d);
+      vec2 uv=vUv+d*r*r*.18;                                   // CRT bulge
+      uv+=normalize(d+1e-4)*sin(r*70.-uT*20.)*.02*uRip;        // ripple when he is pulled in
+      vec2 vu=vec2(.5+(uv.x-.5)*(${(SCR.w / SCR.h).toFixed(3)}/uAsp),uv.y); // source cropped to the 4:3 tube
+      vec3 c=texture2D(tV,vu).rgb;
+      float n=h(floor(vUv*vec2(160.,120.))+floor(uT*30.));
+      c=mix(c,vec3(n),uStat);
+      c=mix(c,vec3(1.,.08,.05),uLive*step(length((vUv-vec2(.1,.88))*vec2(1.5,1.))-.035,0.)*step(.5,fract(uT*.8))); // LIVE dot                                  // channel-change static
+      c*=.86+.14*sin(vUv.y*480.);                              // scanlines
+      c*=smoothstep(.62,.38,r*1.1);                            // tube vignette
+      c=c*1.35*uOn+uFlash*vec3(1.6,1.5,1.4)+vec3(1.,.35,.12)*uRip*.5*(.5+.5*sin(r*40.-uT*25.));
+      gl_FragColor=vec4(c,1.);}`
+}));
+screen.position.set(0, SCR.y, SCR.z); room.add(screen);
+const P = {}; // props by name
+const px = t => { t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestMipmapLinearFilter; t.anisotropy = 1; return t; };
+const tl = new THREE.TextureLoader();
+const roomTex = (f, rx, ry) => { const t = px(tl.load(f)); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); return t; };
+{ // shell: brick walls, plank floor, window wall on the left, dark ceiling
+  const M = (map, c = 0xffffff) => new THREE.MeshStandardMaterial({ map, color: c, roughness: .95 });
+  const brick = new THREE.MeshBasicMaterial({ color: 0x000000, visible: false }); // walls/ceiling: the black background is the darkness; visible planes picked up the sky environment as a blue glow
+  const add = (w, h, mat, x, y, z, ry = 0, rx = 0) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); m.position.set(x, y, z); m.rotation.set(rx, ry, 0); room.add(m); return m; };
+  add(8, 6.5, M(roomTex('tv/floor.webp?v=2', 4, 3.25), 0xc8b8a8), 0, 0, 2.55, 0, -Math.PI / 2); // floor stops at the back wall line (z = -.7, right behind the TV)
+  loader.load('tv/cash.glb', g => { // 'Cash pile and money stacks' by streetpharmacy (CC-BY-4.0): on the floor between the wardrobe and the sofa
+    const o = g.scene, b = new THREE.Box3().setFromObject(o), sz = b.getSize(V3()), k = .95 / Math.max(sz.x, sz.z), w = new THREE.Group();
+    o.scale.setScalar(k); o.position.set(-(b.min.x + b.max.x) / 2 * k, -b.min.y * k, -(b.min.z + b.max.z) / 2 * k);
+    w.position.set(-1.85, 0, 1.0); w.rotation.y = .3; w.add(o); room.add(w); // in the gap left of HONK in the ENTER shot
+    o.traverse(m => { if (m.isMesh) { m.material.metalness = 0; if (m.material.map) px(m.material.map); } });
+  }, undefined, e => console.error(e));
+  loader.load('tv/rug.glb', g => { // 'Rug with tassles' by Diligence7540 (CC-BY-4.0): fitted to a 3.4 m footprint under the sofa front and the table
+    const o = g.scene, b = new THREE.Box3().setFromObject(o), sz = b.getSize(V3()), k = 3.4 / Math.max(sz.x, sz.z), w = new THREE.Group();
+    o.scale.setScalar(k); o.position.set(-(b.min.x + b.max.x) / 2 * k, -b.min.y * k + .002, -(b.min.z + b.max.z) / 2 * k);
+    if (sz.z > sz.x) w.rotation.y = Math.PI / 2; w.position.set(.35, 0, 2.35); w.add(o); room.add(w);
+    o.traverse(m => { if (m.isMesh) { m.material.metalness = 0; m.receiveShadow = true; if (m.material.map) px(m.material.map); } });
+  }, undefined, e => console.error(e));
+  add(8, 8, brick, 0, 3, 1.8, 0, Math.PI / 2);
+  add(8, 3, brick, 0, 1.5, -.7);                       // behind the TV
+  add(8, 3, brick, 0, 1.5, 5.8, Math.PI);              // behind the sofa
+  add(8, 3, brick, 3.6, 1.5, 1.8, -Math.PI / 2);       // right
+  add(8, 3, brick, -3.6, 1.5, 1.8, Math.PI / 2);       // left
+  const shade = new THREE.Mesh(new THREE.SphereGeometry(.2, 12, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd9a0).multiplyScalar(2.2) }));
+  shade.position.set(1.7, 2.45, 2.6); shade.visible = false; room.add(shade); // pendant hidden: its glow bloomed into a blue blob at the top of the frame (the lamp light stays)
+  const cord = new THREE.Mesh(new THREE.CylinderGeometry(.006, .006, .55), new THREE.MeshBasicMaterial({ color: 0x111111 })); cord.position.set(1.7, 2.75, 2.6); cord.visible = false; room.add(cord);
+}
+room.add(new THREE.HemisphereLight(0x51618a, 0x2a1c12, 1.3));
+const tvGlow = new THREE.PointLight(0x8fb4ff, 6, 7, 1.6); tvGlow.position.set(0, SCR.y, .9); room.add(tvGlow);
+const lamp = new THREE.PointLight(0xffb36b, 16, 7, 1.5); lamp.position.set(1.7, 2.3, 2.6); room.add(lamp);
+const moon = new THREE.DirectionalLight(0x6f8cc8, .5); moon.position.set(-5, 3, 2); room.add(moon);
+const zap = new THREE.PointLight(0xff8a3c, 0, 6, 1.4); zap.position.set(0, SCR.y, 1.2); room.add(zap);
+// lightning: jagged tubes from the screen to his head, rebuilt every few frames
+const boltMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, .4, .14).multiplyScalar(3.2), fog: false, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+const bolts = [0, 1, 2].map(() => { const m = new THREE.Mesh(new THREE.BufferGeometry(), boltMat); m.visible = false; room.add(m); return m; });
+function rebuildBolts(to, on) {
+  for (const b of bolts) {
+    b.visible = on; if (!on) continue;
+    const a = V3((Math.random() - .5) * SCR.w * .6, SCR.y + (Math.random() - .5) * SCR.h * .6, SCR.z + .02), pts = [];
+    for (let i = 0; i <= 9; i++) { const k = i / 9, p = a.clone().lerp(to, k); if (i && i < 9) p.add(V3(Math.random() - .5, Math.random() - .5, Math.random() - .5).multiplyScalar(.22 * Math.sin(k * Math.PI))); pts.push(p); }
+    b.geometry.dispose(); b.geometry = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0), 24, .008 + Math.random() * .006, 4, false);
+  }
+}
+const clipPlane = new THREE.Plane(V3(0, 0, 1), -SCR.z); // when he goes in, everything behind the glass is cut away
+// timeline (seconds since the 3D reveal): 0–4.5 pull back, then ENTER; after ENTER: swing 3, remote 4.2, wide 1.6, zap 1.2, flight 1.1, into 1.3, flash .6
+const TK = { // camera keys
+  scr: { pos: V3(0, SCR.y, SCR.z + SCR.h / 2 / Math.tan(THREE.MathUtils.degToRad(15)) * 1.04), look: V3(0, SCR.y, SCR.z), fov: 30 },
+  back: { pos: V3(1.2, 1.25, 4.3), look: V3(.05, .8, .9), fov: 46 }, // behind his right shoulder: HONK big on the left, TV centre, snacks right (the ENTER framing)
+  front: { pos: V3(.05, .92, 1.15), look: V3(.28, .55, SOFA_Z - .05), fov: 44 }, // same angle as the pose reference
+  side: { pos: V3(-4.3, 1.4, 2.0), look: V3(0, .85, 1.75), fov: 46 },
+  over: { pos: V3(1.05, 1.3, 4.35), look: V3(.1, .72, 1.2), fov: 40 },      // after ENTER: closer, over his right shoulder, still from behind
+  zapB: { pos: V3(1.9, 1.7, 5.6), look: V3(0, .8, 1.2), fov: 44 },      // lightning: still behind him, wider so his flinch stays in frame
+  pushB: { pos: V3(.75, 1.15, 3.9), look: V3(0, .68, .3), fov: 38 },     // sucked in: push from behind toward the TV
+  push: { pos: V3(-2.3, 1.05, 1.45), look: V3(0, .72, .35), fov: 40 },
+};
+const TVI = { on: false, ph: 'off', t: 0, a: null, b: null, bt: 0, dur: 1, enter: false, fly: null, nextBolt: 0 };
+function camTo(key, dur) { TVI.a = { pos: camState.pos.clone(), look: camState.look.clone(), fov: camState.fov }; TVI.b = TK[key]; TVI.bt = 0; TVI.dur = dur; }
+function stepCamTV(dt) {
+  if (!TVI.b) return; TVI.bt = Math.min(1, TVI.bt + dt / TVI.dur); const k = ease(TVI.bt), A = TVI.a, B = TVI.b;
+  camState.pos.lerpVectors(A.pos, B.pos, k); camState.look.lerpVectors(A.look, B.look, k); camState.fov = lerp(A.fov, B.fov, k);
+}
+function heroSeat() { hero.quaternion.setFromAxisAngle(Y1, Math.PI); hero.position.copy(SEAT); }
+// seated pose = the lounging start of the Meshy 'Remote' clip (leaning back, arm along the backrest, like the reference), held until he clicks
+function lounge() { // chair-sit clip frozen on an upright frame; recline, arms and legs are posed by IK to match the reference
+  if (current) current.stop(); const a = ACT.Sit; a.reset().setEffectiveWeight(1).play(); a.time = .5; a.timeScale = 0; current = a; // chair-sit body (square chest); the Meshy SitPose clip hunched the shoulders
+}
+function startTV() {
+  SITB.turn = .9;
+  TVI.on = true; TVI.ph = 'video'; room.add(hero); hero.scale.setScalar(1); heroSeat(); lounge();
+  Object.assign(camState, { ...TK.scr, pos: TK.scr.pos.clone(), look: TK.scr.look.clone(), ap: .35, bloom: 1, par: 0, roll: 0 });
+  revealTV(); // no opening video: ENTER starts inside the tube and the camera pulls straight back out of the TV
+}
+// live chase feed for the CRT: the road scene, rendered small from a news-helicopter angle (high enough that the empty driver seat doesn't read)
+const tvRT = new THREE.WebGLRenderTarget(320, 240, { type: THREE.HalfFloatType }), tvCam = new THREE.PerspectiveCamera(38, 4 / 3, .5, 220), _tc = V3();
+function renderTVFeed() {
+  car.getWorldPosition(_tc); const a = clock * .12;
+  tvCam.position.set(_tc.x - 9 + Math.sin(a) * 3, _tc.y + 11, _tc.z + 9 + Math.cos(a) * 2); tvCam.lookAt(_tc.x - 3, _tc.y, _tc.z);
+  R.setRenderTarget(tvRT); R.render(scene, tvCam);
+}
+function revealTV() {
+  if (TVI.ph !== 'video') return; $('skip').classList.remove('on'); // no Skip in the room: ENTER is the way on
+  TVI.ph = 'pull'; TVI.t = 0; $('tvwrap').classList.remove('on'); camTo('back', 4.5);
+  tvv.pause(); scrU.tV.value = tvRT.texture; scrU.uAsp.value = 4 / 3; scrU.uLive.value = 1; // the tube cuts to the live chase
+}
+/* ---------- TV-pull sound effects, synthesized: electric arc crackle, sub thump, whoosh, suction ---------- */
+function sfxNoise(c) { if (SND.nz) return SND.nz; const b = c.createBuffer(1, c.sampleRate, c.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return SND.nz = b; }
+function sfxOut() { const c = SND.ctx; return c && c.state === 'running' && SND.on ? c : null; }
+function sfxZap() { // ~1.4 s of crackling arcs over a mains buzz, opened by a low thump
+  const c = sfxOut(); if (!c) return; const t0 = c.currentTime, nz = sfxNoise(c);
+  const th = c.createOscillator(), tg = c.createGain(); th.frequency.setValueAtTime(90, t0); th.frequency.exponentialRampToValueAtTime(32, t0 + .35);
+  tg.gain.setValueAtTime(.9, t0); tg.gain.exponentialRampToValueAtTime(.001, t0 + .45); th.connect(tg).connect(SND.out); th.start(t0); th.stop(t0 + .5);
+  const bz = c.createOscillator(), bf = c.createBiquadFilter(), bg = c.createGain(); bz.type = 'sawtooth'; bz.frequency.value = 118; bf.type = 'bandpass'; bf.frequency.value = 900; bf.Q.value = 1.2;
+  bg.gain.setValueAtTime(0, t0); bg.gain.linearRampToValueAtTime(.12, t0 + .05); bg.gain.setValueAtTime(.12, t0 + 1.2); bg.gain.linearRampToValueAtTime(0, t0 + 1.5);
+  bz.connect(bf).connect(bg).connect(SND.out); bz.start(t0); bz.stop(t0 + 1.55);
+  for (let t = 0; t < 1.45; t += .015 + Math.random() * .05) { // sparse random arcs
+    const s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain(), at = t0 + t, len = .008 + Math.random() * .04;
+    s.buffer = nz; f.type = 'highpass'; f.frequency.value = 1800 + Math.random() * 4000; g.gain.setValueAtTime(.35 + Math.random() * .45, at); g.gain.exponentialRampToValueAtTime(.001, at + len);
+    s.connect(f).connect(g).connect(SND.out); s.start(at, Math.random() * .9, len + .01);
+  }
+}
+function sfxWhoosh() { // filtered-noise rush as he is yanked toward the screen
+  const c = sfxOut(); if (!c) return; const t0 = c.currentTime, s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+  s.buffer = sfxNoise(c); s.loop = true; f.type = 'bandpass'; f.Q.value = 1.4; f.frequency.setValueAtTime(300, t0); f.frequency.exponentialRampToValueAtTime(2600, t0 + .9);
+  g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(.55, t0 + .5); g.gain.exponentialRampToValueAtTime(.001, t0 + 1.2);
+  s.connect(f).connect(g).connect(SND.out); s.start(t0); s.stop(t0 + 1.25);
+}
+function sfxSuck() { // into the tube: falling suction tone + a bright zap as the screen flashes white
+  const c = sfxOut(); if (!c) return; const t0 = c.currentTime, o = c.createOscillator(), g = c.createGain();
+  o.type = 'triangle'; o.frequency.setValueAtTime(880, t0); o.frequency.exponentialRampToValueAtTime(70, t0 + 1.2);
+  g.gain.setValueAtTime(.0001, t0); g.gain.exponentialRampToValueAtTime(.3, t0 + .15); g.gain.exponentialRampToValueAtTime(.001, t0 + 1.3); o.connect(g).connect(SND.out); o.start(t0); o.stop(t0 + 1.35);
+  const s = c.createBufferSource(), f = c.createBiquadFilter(), g2 = c.createGain(), at = t0 + 1.25; s.buffer = sfxNoise(c); f.type = 'highpass'; f.frequency.value = 2500;
+  g2.gain.setValueAtTime(.7, at); g2.gain.exponentialRampToValueAtTime(.001, at + .35); s.connect(f).connect(g2).connect(SND.out); s.start(at, 0, .4);
+}
+function tvEnter() { if (TVI.ph !== 'wait') return; startBgm(); /* music starts on the second ENTER */ $('tventer').classList.remove('on'); TVI.ph = 'face'; TVI.t = 0; } // turns to the TV, then the lightning takes him
+function endTV() {
+  if (!TVI.on) return; TVI.on = false; TVI.ph = 'off';
+  tvv.pause(); $('tvwrap').classList.remove('on'); $('tventer').classList.remove('on'); $('skip').classList.remove('on');
+  hero.traverse(o => { if (o.material) o.material.clippingPlanes = null; });
+  car.add(hero); hero.position.copy(HERO0.p); hero.quaternion.copy(HERO0.q); hero.scale.copy(HERO0.s); setClip('Idle', 0);
+  comp.uniforms.uFade.value = 1; R.localClippingEnabled = false;
+  station = -1; lockUntil = 0; go(0, true); $('ui').classList.add('on'); startMusic(); comp.uniforms.uGlitch.value = 1; // lands on WIDE through a prism/CRT glitch
+}
+const _hd = V3(), _hip = V3(), _qa = new THREE.Quaternion(), X1 = V3(1, 0, 0);
+const RHOLD = { p: [2.5, 6, 0], r: [0, 0, Math.PI / 2] }; // left hand (+X = palm side): remote along the fingers // remote in the palm (hand -X = palm side), along the fingers; wrist rolled palm-up
+function holdRemote() {
+  const o = P.remote; if (!o || o.userData.v0 || !bones.LeftHand) return;
+  const held = (TVI.rw || 0) > .05 || ['wide', 'zap'].includes(TVI.ph); // lies on the cushion until he picks it up to click
+  if (!held) { if (o.parent !== room) room.attach(o); o.scale.setScalar(1); o.position.set(SEAT.x - .42, .37, SOFA_Z - .08); o.rotation.set(0, .5, 0); return; }
+  if (o.parent !== bones.LeftHand) { bones.LeftHand.add(o); o.userData.home = true; }
+  const s = 1 / bones.LeftHand.getWorldScale(_hd).x; o.scale.setScalar(s); o.position.fromArray(RHOLD.p); o.rotation.fromArray(RHOLD.r); // hand-local (cm), tuned by eye
+}
+// leg IK on the sofa: Meshy's sit clips assume a tall seat, so the thighs sank into the cushion. Two-bone IK puts each ankle on the
+// floor in front of the sofa and bends the knee up/forward over the cushion edge. Runs after the mixer; BASE restores the clip pose next frame.
+const Z1 = V3(0, 0, 1);
+const RREST = { x: .84, y: .52, z: -.2, pole: V3(.2, -1, .6).normalize() }; // right hand on top of the sofa arm (absolute x, z from the sofa)
+const LAIM = { x: -.1, y: .76, z: -.6, pole: V3(-.7, -.5, .6).normalize() }; // elbow out and back // where the remote hand goes when he clicks
+const SITB = { back: .12, nose: -.12, turn: .9 }; // head turned a little toward his right, like the reference // torso tilt (z per unit up) and snout pitch, from the pose reference // the Meshy sit pose reclines a lot; bring the back nearly upright like the reference
+const IK = { w: 0, FOOT_Z: SOFA_Z - .38, FOOT_Y: .085, POLE: V3(0, .7, -1).normalize() }; // feet just in front of the sofa base (his legs are short for this deep sofa)
+const _H = V3(), _K = V3(), _A = V3(), _T = V3(), _d = V3(), _b = V3(), _Kt = V3(), _v1 = V3(), _v2 = V3(), _qi = new THREE.Quaternion();
+function aimBone(bone, from, to, w) { _qi.setFromUnitVectors(from.normalize(), to.normalize()); _qi.slerp(new THREE.Quaternion(), 1 - w); bone.parent.getWorldQuaternion(_pq); bone.quaternion.premultiply(_pq.clone().invert().multiply(_qi).multiply(_pq)); bone.updateMatrixWorld(true); }
+function twoBone(U, L, E, target, pole, w) { // aim root U and mid L so the end E reaches target, bending toward pole
+  U.getWorldPosition(_H); L.getWorldPosition(_K); E.getWorldPosition(_A);
+  const l1 = _K.distanceTo(_H), l2 = _A.distanceTo(_K);
+  _d.subVectors(target, _H); const D = Math.min(_d.length(), (l1 + l2) * .995); _d.normalize();
+  const a = (l1 * l1 - l2 * l2 + D * D) / (2 * D), h = Math.sqrt(Math.max(0, l1 * l1 - a * a));
+  _b.copy(pole).addScaledVector(_d, -pole.dot(_d)).normalize();
+  _Kt.copy(_H).addScaledVector(_d, a).addScaledVector(_b, h);
+  aimBone(U, _v1.subVectors(_K, _H), _v2.subVectors(_Kt, _H), w);
+  L.getWorldPosition(_K); E.getWorldPosition(_A); _T.copy(_H).addScaledVector(_d, D);
+  aimBone(L, _v1.subVectors(_A, _K), _v2.subVectors(_T, _K), w);
+}
+const _tg = V3();
+// wrist: turn the hand so its finger axis (local +Y) and back-of-hand axis point where we want, in world space
+const _m1 = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _qa2 = new THREE.Quaternion(), _qc = new THREE.Quaternion(), _hf = V3(), _bk = V3(), _sd = V3();
+function orientHand(bone, backLocal, fingers, back, w) { // rotate so local +Y (fingers) and backLocal (back of hand) point at the world targets
+  if (w < .01) return;
+  _hf.copy(fingers).normalize(); _bk.copy(back).addScaledVector(_hf, -back.dot(_hf)).normalize(); _sd.crossVectors(_hf, _bk);
+  const bl = _v3.copy(backLocal).normalize(), fl = _v4.set(0, 1, 0), sl = _v5.crossVectors(fl, bl);
+  _m1.makeBasis(fl, bl, sl); _m2.makeBasis(_hf, _bk, _sd); _m2.multiply(_m1.transpose()); // world = W * L^T
+  _qa2.setFromRotationMatrix(_m2); bone.getWorldQuaternion(_qc);
+  _qi.copy(_qa2).multiply(_qc.invert()); _qi.slerp(new THREE.Quaternion(), 1 - w);
+  bone.parent.getWorldQuaternion(_pq); bone.quaternion.premultiply(_pq.clone().invert().multiply(_qi).multiply(_pq)); bone.updateMatrixWorld(true);
+}
+const _v3 = V3(), _v4 = V3(), _v5 = V3();
+const HAND = { rB: V3(1, 0, 0), lB: V3(-1, 0, 0), rF: V3(1, -.35, .1), lF: V3(-.05, -.6, -1), aimF: V3(.05, -.05, -1), up: V3(0, 1, 0), aimB: V3(-.7, .7, 0) };
+function stepLegIK(dt) {
+  const on = TVI.on && ['pull', 'wait', 'face', 'swing', 'remote', 'wide'].includes(TVI.ph);
+  IK.w = dt > 0 ? lerp(IK.w, on ? 1 : 0, 1 - Math.exp(-dt * 8)) : (on ? 1 : 0);
+  if (IK.w < .01 || !bones.LeftUpLeg) return;
+  hero.updateMatrixWorld(true);
+  for (const sd of ['Left', 'Right']) { bones[sd + 'Foot'].getWorldPosition(_A); twoBone(bones[sd + 'UpLeg'], bones[sd + 'Leg'], bones[sd + 'Foot'], _tg.set(_A.x, IK.FOOT_Y, IK.FOOT_Z), IK.POLE, IK.w); }
+  // relaxed, never frozen: lean back into the cushions + slow breathing, a little weight shift and a wandering head
+  // torso: aim lower-spine→neck at a nearly upright line (slight recline), whatever the clip does; then breathing
+  bones.Spine02.getWorldPosition(_H); bones.neck.getWorldPosition(_K); aimBone(bones.Spine02, _v1.subVectors(_K, _H), _v2.set(0, 1, SITB.back), IK.w);
+  rotateWorld(bones.Spine02, X1, Math.sin(clock * 1.5) * .02 * IK.w);
+  bones.Spine02.updateMatrixWorld(true); rotateWorld(bones.Spine01, _v1.set(0, 1, 0), (Math.sin(clock * .37) * .05 + Math.sin(clock * .91) * .015) * IK.w);
+  bones.Spine01.updateMatrixWorld(true); rotateWorld(bones.Spine01, Z1, Math.sin(clock * .29 + 1) * .03 * IK.w);
+  bones.Spine02.updateMatrixWorld(true); bones.Head.getWorldPosition(_H); bones.headfront.getWorldPosition(_K); aimBone(bones.Head, _v1.subVectors(_K, _H), _v2.set(SITB.turn, SITB.nose + Math.sin(clock * .53) * .03, -1), IK.w); // snout level, toward the TV rotateWorld(bones.Head, _v1.set(0, 1, 0), Math.sin(clock * .41 + 2) * .08 * IK.w); // eyes stay on the TV
+  // left arm along the backrest, like the reference: hand IK onto the top of the sofa back, elbow down and back
+  bones.Spine02.updateMatrixWorld(true);
+  rotateWorld(bones.RightShoulder, Z1, .09 * IK.w); bones.RightShoulder.updateMatrixWorld(true); // keep the shoulder from sagging
+  twoBone(bones.RightArm, bones.RightForeArm, bones.RightHand, _tg.set(RREST.x, RREST.y, SOFA_Z + RREST.z), RREST.pole, IK.w); // right arm out, hand on the sofa arm
+  orientHand(bones.RightHand, HAND.rB, HAND.rF, HAND.up, IK.w); // palm down, fingers draped over the top of the sofa
+  const rw = TVI.rw || 0; // left hand: on top of the left knee (where leg IK put it), or lifting the remote at the TV
+  bones.LeftLeg.getWorldPosition(_tg).add(_v2.set(-.01, .085, .07)); _tg.lerp(_v1.set(SEAT.x + LAIM.x, LAIM.y, SOFA_Z + LAIM.z), rw);
+  twoBone(bones.LeftArm, bones.LeftForeArm, bones.LeftHand, _tg.clone(), LAIM.pole, IK.w);
+  orientHand(bones.LeftHand, HAND.lB, _v1.copy(HAND.lF).lerp(HAND.aimF, rw), _v2.copy(HAND.up).lerp(HAND.aimB, rw), IK.w); // on the knee: palm down; clicking: thumb on top, fingers at the TV
+}
+// lightning blast: snacks thrown off the table (ballistic, tumbling, bouncing), sofa and table shoved away from the TV
+function blast() {
+  for (const o of SN) o.userData.v = V3(2.6 + Math.random() * 1.8, 1.8 + Math.random() * 1.8, (Math.random() - .5) * 1.4), o.userData.w = V3(Math.random() * 14 - 7, Math.random() * 10 - 5, Math.random() * 14 - 7);
+  for (const [o, dx, dz, ry] of [[P.sofa, 0, .38, .14], [P.table, .75, .1, -.5]]) if (o) o.userData.shove = { t: 0, x0: o.position.x, z0: o.position.z, r0: o.rotation.y, dx, dz, ry }; // everything is flung to the right
+}
+function stepBlast(dt) {
+  for (const o of SN) { const v = o.userData.v; if (!v) continue;
+    v.y -= 9.8 * dt; o.position.addScaledVector(v, dt); o.rotation.x += o.userData.w.x * dt; o.rotation.y += o.userData.w.y * dt; o.rotation.z += o.userData.w.z * dt;
+    if (o.position.y < 0) { o.position.y = 0; v.y *= -.32; v.x *= .55; v.z *= .55; o.userData.w.multiplyScalar(.5); if (Math.abs(v.y) < .3) v.y = 0; } }
+  for (const o of [P.sofa, P.table]) { const S = o?.userData.shove; if (!S || S.t >= 1) continue;
+    S.t = Math.min(1, S.t + dt / .35); const k = 1 - Math.pow(1 - S.t, 3); o.position.x = S.x0 + S.dx * k; o.position.z = S.z0 + S.dz * k; o.rotation.y = S.r0 + S.ry * k; }
+}
+function stepTV(dt) {
+  if (TVI.on && ['zap', 'fly', 'into'].includes(TVI.ph)) stepBlast(dt);
+  TVI.t += dt; const t = TVI.t; scrU.uT.value = clock; stepCamTV(dt);
+
+  tvGlow.intensity = 9 + Math.sin(clock * 23) * .6 + Math.sin(clock * 7.3) * .9; // tube flicker
+  if (TVI.ph === 'pull' && t > 4.6) { TVI.ph = 'wait'; camState.ap = .7; /* shallower depth of field so the hover focus reads */ $('tventer').classList.add('on'); $('tventer').focus({ preventScroll: true }); }
+  if (TVI.ph === 'face') { SITB.turn = .9 * (1 - ease(Math.min(1, t / .7))); if (t > .85) { TVI.ph = 'zap'; TVI.t = 0; setClip('Yank', .25); camTo('zapB', .7); sfxZap(); blast(); return; } } // head swings round to the screen
+  if (TVI.ph === 'swing' && t > 2.4) { TVI.ph = 'remote'; TVI.t = 0; return; }
+  TVI.rw = TVI.ph === 'remote' ? Math.min(ease(clamp((t - .1) / .55, 0, 1)), 1 - ease(clamp((t - 3.2) / .6, 0, 1))) : 0; // right arm IK: lift the remote toward the TV, then lower it
+  if (TVI.ph === 'remote') { // thumb presses at ~2.1 s and ~2.7 s in the clip → static burst
+    scrU.uStat.value = (t > .9 && t < 1.15) || (t > 1.5 && t < 1.75) ? .85 : 0;
+    if (t > 3.9) { TVI.ph = 'wide'; TVI.t = 0; camTo('back', 1.6); scrU.uStat.value = 0; return; }
+  }
+  if (TVI.ph === 'wide' && t > 1.6) { TVI.ph = 'zap'; TVI.t = 0; setClip('Yank', .25); return; }
+  if (TVI.ph === 'zap') {
+    bones.Head?.getWorldPosition(_hd); scrU.uStat.value = .35 + Math.random() * .3; scrU.uRip.value = Math.min(1, t);
+    if (clock > TVI.nextBolt) { rebuildBolts(_hd, Math.random() < .8); TVI.nextBolt = clock + .05 + Math.random() * .06; }
+    zap.intensity = 6 + Math.random() * 10;
+    if (t > 1.25) { // yanked off the sofa
+      sfxWhoosh();
+      TVI.ph = 'fly'; TVI.t = 0; setClip('Panic', .2); camTo('pushB', 2.4);
+      bones.Hips.getWorldPosition(_hip); TVI.fly = { from: _hip.clone(), to: V3(0, SCR.y, SCR.z + .55) };
+      for (const o of [P.pillow, P.remote]) if (o) { room.attach(o); o.userData.v0 = o.position.clone(); o.userData.spin = V3(Math.random() * 9, Math.random() * 9, Math.random() * 9); }
+      return;
+    }
+  }
+  if (TVI.ph === 'fly' || TVI.ph === 'into') {
+    const F = TVI.fly, into = TVI.ph === 'into', k = into ? 1 : ease(Math.min(1, t / 1.1));
+    if (clock > TVI.nextBolt) { bones.Head.getWorldPosition(_hd); rebuildBolts(_hd, !into || t < .7); TVI.nextBolt = clock + .06; }
+    zap.intensity = 4 + Math.random() * 8; scrU.uRip.value = 1; scrU.uStat.value = .2;
+    _hip.lerpVectors(F.from, F.to, k); _hip.y += Math.sin(k * Math.PI) * .35;      // arc toward the glass
+    if (into) _hip.z -= Math.min(1.4, t * 1.25);                                     // head and shoulders through the screen, legs kicking
+    const pitch = -Math.PI / 2 * Math.min(1, k * 1.6);                              // tips head-first toward the TV
+    hero.quaternion.setFromAxisAngle(X1, pitch).multiply(_qa.setFromAxisAngle(Y1, Math.PI));
+    hero.position.copy(_hip).sub(_pv.copy(PIV).applyQuaternion(hero.quaternion));
+    for (const o of [P.pillow, P.remote]) if (o && o.userData.v0) { // they get pulled in a beat later
+      const kk = ease(clamp((into ? 1.1 + t : t) / 1.6 - .15, 0, 1)); o.position.lerpVectors(o.userData.v0, V3((o === P.pillow ? -.12 : .1), SCR.y, SCR.z), kk);
+      o.rotation.x += o.userData.spin.x * dt; o.rotation.y += o.userData.spin.y * dt; o.visible = kk < .98;
+    }
+    if (!into && t > 1.1) { sfxSuck(); TVI.ph = 'into'; TVI.t = 0; TVI.fly.to.z = _hip.z; R.localClippingEnabled = true; hero.traverse(o => { if (o.material) o.material.clippingPlanes = [clipPlane]; }); }
+    if (into && t > 1.0) { // flash radiates out of the screen until it fills the frame
+      const f = clamp((t - 1.0) / .85, 0, 1), fl = $("tvflash"); scrU.uFlash.value = Math.min(3, f * 5); comp.uniforms.uFade.value = 1 + f * 1.5;
+      _hd.copy(screen.position).project(cam); fl.classList.remove("out"); fl.style.opacity = Math.min(1, f * 3);
+      fl.style.setProperty("--x", ((_hd.x + 1) * 50).toFixed(1) + "%"); fl.style.setProperty("--y", ((1 - _hd.y) * 50).toFixed(1) + "%"); fl.style.setProperty("--r", (Math.pow(f, 2.2) * 160).toFixed(1) + "vmax");
+      if (t > 1.95) { rebuildBolts(_hd, false); endTV(); fl.classList.add("out"); requestAnimationFrame(() => fl.style.opacity = 0); } }
+  }
+  if (TVI.ph !== 'zap' && TVI.ph !== 'fly' && TVI.ph !== 'into') { zap.intensity = 0; if (bolts[0].visible) rebuildBolts(_hd, false); }
+}
+
+/* ---------- neck spring: head is a damped mass on the neck, driven by hip vertical acceleration (here: the suspension) ---------- */
+const NECK = { x: 0, v: 0, py: null, pv: 0, acc: 0, K: 340, C: 8.5, G: 5.5, MAX: .26 };
+const _q = new THREE.Quaternion(), _pq = new THREE.Quaternion(), _ax = V3(), _p = V3();
+function rotateWorld(bone, axis, ang) { // world-axis rotation (Meshy bone axes are skewed)
+  bone.parent.getWorldQuaternion(_pq); _q.setFromAxisAngle(axis, ang);
+  bone.quaternion.premultiply(_pq.clone().invert().multiply(_q).multiply(_pq));
+}
+function stepNeck(dt) {
+  if (!bones.neck || dt <= 0) return;
+  bones.Hips.updateWorldMatrix(true, false); bones.Hips.getWorldPosition(_p);
+  if (NECK.py === null) NECK.py = _p.y;
+  const v = (_p.y - NECK.py) / dt; NECK.acc = lerp(NECK.acc, (v - NECK.pv) / dt, .5); NECK.py = _p.y; NECK.pv = v;
+  const sub = 4, h = dt / sub; // semi-implicit Euler substeps
+  for (let i = 0; i < sub; i++) { NECK.v += (-NECK.K * NECK.x - NECK.C * NECK.v - NECK.acc) * h; NECK.x += NECK.v * h; }
+  const pitch = NECK.MAX * Math.tanh(NECK.x * NECK.G / NECK.MAX); // + nose-up
+  _ax.set(1, 0, 0).applyQuaternion(hero.quaternion); // hero's pitch axis in world
+  rotateWorld(bones.neck, _ax, -pitch * .6);
+  bones.neck.updateWorldMatrix(false, false);
+  rotateWorld(bones.Head, _ax, -pitch * .4);
+}
+
+/* ---------- blink: the mesh has no lids, so a lid is painted over each eye in bind-pose space (moves with the skin) ---------- */
+// eye centres/radii measured on honk.glb's quantized position attribute (mirrored in x); re-measure if the GLB is rebuilt
+const EYE = { b: 0, t: -1, next: 1.5, dbl: false, U: { value: 0 } };
+function addBlink(mat) {
+  mat.onBeforeCompile = s => {
+    s.uniforms.uBlink = EYE.U; s.uniforms.uLid = { value: new THREE.Color().setRGB(117 / 255, 77 / 255, 49 / 255, THREE.SRGBColorSpace) };
+    s.vertexShader = 'varying vec3 vBind;\n' + s.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvBind = position;');
+    s.fragmentShader = 'uniform float uBlink;uniform vec3 uLid;varying vec3 vBind;\n' + s.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      if (uBlink > .01) {
+        vec3 d = (vec3(abs(vBind.x), vBind.y, vBind.z) - vec3(.072, .785, .095)) / vec3(.03, .014, .035);
+        float e = 1. - smoothstep(.8, 1.2, length(d)), edge = 1.2 - 2.6 * uBlink;   // lid sweeps top → bottom
+        float lid = smoothstep(edge - .12, edge + .12, d.y), lash = 1. - smoothstep(0., .22, abs(d.y - edge));
+        diffuseColor.rgb = mix(diffuseColor.rgb, uLid * (1. - .55 * lash), e * lid);
+      }`);
+  };
+}
+function stepBlink(dt) {
+  if (EYE.t < 0) { EYE.next -= dt; if (EYE.next <= 0) { EYE.t = 0; EYE.dbl = Math.random() < .2; } }
+  else {
+    EYE.t += dt; const k = EYE.t / .17; // fast close, slower open
+    EYE.b = k < .35 ? k / .35 : Math.max(0, 1 - (k - .35) / .65);
+    if (k >= 1) { EYE.b = 0; if (EYE.dbl) { EYE.dbl = false; EYE.t = 0; } else { EYE.t = -1; EYE.next = 2 + Math.random() * 3.5; } }
+  }
+  EYE.U.value = EYE.b;
+}
+
+/* ---------- sound: synthesized engine drone + road roar, random horns from traffic, the cruiser's siren (no music) ---------- */
+// sfx/horns.mp3: 7 horns in 3 s slots — 'Car Horn 02', 'Double Car Honk',
+// 'Vintage Car Horn' (Universfield), 'Car Honk', 'Clown Car Horn' (DRAGON-STUDIO), 'Car horn beep beep' (freesound_community), 'Car Horn 3'
+// (floraphonic), all Pixabay Content License; sfx/siren.mp3 supplied by the user. Mono, loudness-normalised, built with ffmpeg (_src/NOTES.md).
+const SND = { ctx: null, on: true, out: null, buf: {}, siren: null, next: 3 }, SIREN_VOL = .12, HORN_VOL = .2, BGM_VOL = .55; // levels (siren was .3, horns ~.5; user asked for quieter)
+const BGM = Object.assign(new Audio('sfx/bgm.mp3'), { preload: 'auto' }); // buffers during the TV intro
+const SFX = Object.fromEntries(['siren', 'horns'].map(n => [n, fetch(`sfx/${n}.mp3`).then(r => r.arrayBuffer()).catch(() => null)]));
+function audioInit() {
+  if (SND.ctx) { SND.ctx.resume(); return; }
+  const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+  const c = SND.ctx = new AC(); SND.out = c.createGain(); SND.out.gain.value = SND.on ? .8 : 0; SND.out.connect(c.destination);
+}
+function startBgm() { // from the TV-room ENTER: sfx/bgm.mp3 is honkbgm.mp3 cut from 0:34, so the 1 s fade-in lands full volume at 0:35
+  const c = SND.ctx; if (!c || SND.bgm) return; SND.bgm = true;
+  const bg = c.createGain(); bg.gain.value = 0; BGM.loop = true; c.createMediaElementSource(BGM).connect(bg).connect(SND.out);
+  BGM.addEventListener('playing', () => { bg.gain.setValueAtTime(0, c.currentTime); bg.gain.linearRampToValueAtTime(BGM_VOL, c.currentTime + 1); }, { once: true }); // fade starts when sound actually does
+  BGM.play().catch(() => {});
+}
+function startMusic() { // engine, road roar, siren and horns start with the drive (after the TV intro); name kept from the old music hook
+  const c = SND.ctx; if (!c || SND.music) return; SND.music = true;
+  // the original synthesized engine drone + brown-noise road roar (restored: the user wanted these kept, plus siren and horns)
+  const nb = c.createBuffer(1, c.sampleRate * 2, c.sampleRate), d = nb.getChannelData(0);
+  for (let i = 0, l = 0; i < d.length; i++) { l = (l + .02 * (Math.random() * 2 - 1)) / 1.02; d[i] = l * 3.5; } // brown noise
+  const o = c.createOscillator(), of = c.createBiquadFilter(), og = c.createGain(), lfo = c.createOscillator(), lg = c.createGain();
+  o.type = 'sawtooth'; o.frequency.value = 44; lfo.frequency.value = .23; lg.gain.value = 1.5; lfo.connect(lg).connect(o.frequency);
+  of.type = 'lowpass'; of.frequency.value = 160; og.gain.value = .14; o.connect(of).connect(og).connect(SND.out);
+  const n = c.createBufferSource(), nf = c.createBiquadFilter(), ng = c.createGain(); n.buffer = nb; n.loop = true;
+  nf.type = 'lowpass'; nf.frequency.value = 650; ng.gain.value = .22; n.connect(nf).connect(ng).connect(SND.out);
+  o.start(); lfo.start(); n.start();
+  for (const [k, p] of Object.entries(SFX)) p.then(ab => ab && c.decodeAudioData(ab)).then(buf => {
+    if (!buf) return; SND.buf[k] = buf; if (k === 'horns') return;
+    const s = c.createBufferSource(), g = c.createGain(); s.buffer = buf; s.loop = true; s.loopStart = .06; s.loopEnd = buf.duration - .06; // skip MP3 padding → no click
+    g.gain.setValueAtTime(0, c.currentTime); g.gain.linearRampToValueAtTime(SIREN_VOL, c.currentTime + 1.5);
+    s.connect(g).connect(SND.out); s.start(0, .06); SND.siren = g;
+  }).catch(() => {});
+}
+// NOS burn sound, synthesized (no licensed file): ignition thump + roaring low noise + bright crackle; gain follows the flame in stepGallery
+const NOS_VOL = .5;
+function nosSound(on) {
+  const c = SND.ctx; if (SND.nos) { const g = SND.nos, t = c.currentTime; g.gain.cancelScheduledValues(t); g.gain.setTargetAtTime(0, t, .15); setTimeout(() => g.disconnect(), 900); SND.nos = null; }
+  if (!on || !c) return; const t0 = c.currentTime, nz = sfxNoise(c), g = SND.nos = c.createGain(); g.gain.value = 0; g.connect(SND.out);
+  const roar = c.createBufferSource(), lp = c.createBiquadFilter(); roar.buffer = nz; roar.loop = true; lp.type = 'lowpass'; lp.frequency.value = 420; lp.Q.value = .7; // rocket roar
+  const hiss = c.createBufferSource(), bp = c.createBiquadFilter(), hg = c.createGain(); hiss.buffer = nz; hiss.loop = true; hiss.playbackRate.value = .7; bp.type = 'bandpass'; bp.frequency.value = 2400; bp.Q.value = .8; hg.gain.value = .35;
+  const am = c.createOscillator(), ag = c.createGain(); am.type = 'square'; am.frequency.value = 23; ag.gain.value = .2; am.connect(ag).connect(hg.gain); // crackle flutter
+  roar.connect(lp).connect(g); hiss.connect(bp).connect(hg).connect(g); [roar, hiss, am].forEach(n => { n.start(t0); n.stop(t0 + 600); });
+  lp.frequency.setValueAtTime(1800, t0); lp.frequency.exponentialRampToValueAtTime(420, t0 + .6); // ignition: bright burst settling to a roar
+  const th = c.createOscillator(), tg = c.createGain(); th.frequency.setValueAtTime(120, t0); th.frequency.exponentialRampToValueAtTime(35, t0 + .4);
+  tg.gain.setValueAtTime(.8, t0); tg.gain.exponentialRampToValueAtTime(.001, t0 + .5); th.connect(tg).connect(SND.out); th.start(t0); th.stop(t0 + .55);
+}
+function stepAudio(dt) {
+  const c = SND.ctx; if (!c || c.state !== 'running' || dt <= 0) return;
+  if (SND.siren) SND.siren.gain.setTargetAtTime(GAL.sky ? 0 : SIREN_VOL * clamp(7 / -chaser.position.x, .2, 1.2), c.currentTime, .2); // louder when the cruiser closes in, gone in the sky
+  if ((SND.next -= dt) > 0 || !SND.buf.horns || GAL.sky) return;
+  SND.next = 4 + Math.random() * 9; // a horn somewhere in the traffic every 4–13 s
+  const s = c.createBufferSource(), g = c.createGain(), p = c.createStereoPanner(), i = Math.random() * 7 | 0;
+  s.buffer = SND.buf.horns; s.playbackRate.value = .95 + Math.random() * .1; g.gain.value = HORN_VOL * (.7 + Math.random() * .6); p.pan.value = Math.random() * 1.6 - .8;
+  s.connect(g).connect(p).connect(SND.out); s.start(c.currentTime, i * 3, 2.9);
+}
+
+// three's PropertyMixer skips writing a bone whose sampled value didn't change, so additive offsets (sit IK, neck spring, look-at)
+// would pile up. Restore the clean clip pose before the mixer runs, snapshot it after.
+const BASE = [];
+function poseBase(restore) {
+  if (!BASE.length && bones.neck) for (const n of ['neck', 'Head', 'Spine', 'Spine01', 'Spine02', 'LeftUpLeg', 'LeftLeg', 'RightUpLeg', 'RightLeg', 'LeftArm', 'LeftForeArm', 'LeftHand', 'RightArm', 'RightForeArm', 'RightHand', 'RightShoulder'])
+    if (bones[n]) BASE.push([bones[n], bones[n].quaternion.clone()]);
+  for (const [b, q] of BASE) restore ? b.quaternion.copy(q) : q.copy(b.quaternion);
+}
+
+/* ---------- head look-at: neck + head turn toward the lens, nudged by the pointer; eyes stay mostly on the road ---------- */
+const LOOK = { yaw: 0, pitch: 0, MAXY: .6, MAXP: .28 };
+const _hp = V3(), _to = V3(), _lq = new THREE.Quaternion(), _up = V3(0, 1, 0), _cr = V3(), _cu = V3();
+function stepLook(dt) {
+  if (!bones.Head || TVI.on) return;
+  bones.Head.getWorldPosition(_hp);
+  _cr.setFromMatrixColumn(cam.matrixWorld, 0); _cu.setFromMatrixColumn(cam.matrixWorld, 1);
+  hero.getWorldQuaternion(_lq).invert();
+  _to.copy(cam.position).addScaledVector(_cr, ptr.cx * .9).addScaledVector(_cu, -ptr.cy * .5).sub(_hp).applyQuaternion(_lq);
+  let ty = Math.atan2(_to.x, _to.z), tp = Math.atan2(_to.y, Math.hypot(_to.x, _to.z));
+  if (Math.abs(ty) > 2.2) ty = tp = 0; // target behind: don't snap round
+  const w = .65;
+  ty = clamp(ty, -LOOK.MAXY, LOOK.MAXY) * w; tp = clamp(tp, -LOOK.MAXP, LOOK.MAXP) * w;
+  const k = dt > 0 ? 1 - Math.exp(-dt * 3.5) : 1;
+  LOOK.yaw = lerp(LOOK.yaw, ty, k); LOOK.pitch = lerp(LOOK.pitch, tp, k);
+  rotateWorld(bones.neck, _up, LOOK.yaw * .35); rotateWorld(bones.Head, _up, LOOK.yaw * .65);
+  _ax.set(Math.cos(LOOK.yaw), 0, -Math.sin(LOOK.yaw)).applyQuaternion(hero.getWorldQuaternion(_lq)); // pitch axis after the yaw
+  rotateWorld(bones.neck, _ax, -LOOK.pitch * .3); rotateWorld(bones.Head, _ax, -LOOK.pitch * .7);
+}
+
+/* ---------- post: DoF gather → bloom → grade (house: MELONDOG, ported to r170) ---------- */
+const rtOpt = { type: THREE.HalfFloatType, format: THREE.RGBAFormat, colorSpace: THREE.LinearSRGBColorSpace };
+const rt = new THREE.WebGLRenderTarget(2, 2, { ...rtOpt, samples: 0 }); rt.depthTexture = new THREE.DepthTexture(2, 2); rt.depthTexture.type = THREE.UnsignedIntType;
+const rtD = new THREE.WebGLRenderTarget(2, 2, rtOpt), bA = new THREE.WebGLRenderTarget(2, 2, rtOpt), bB = new THREE.WebGLRenderTarget(2, 2, rtOpt);
+const QV = `varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}`;
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2)); quad.frustumCulled = false;
+const pScene = new THREE.Scene(); pScene.add(quad); const pCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const DEPTH = `uniform sampler2D tDepth;uniform float uNear,uFar;float vz(vec2 uv){float z=texture2D(tDepth,uv).x*2.-1.;return 2.*uNear*uFar/(uFar+uNear-z*(uFar-uNear));}`;
+const TAPS = MOBILE ? 24 : 48;
+const dof = new THREE.ShaderMaterial({
+  uniforms: { tColor: { value: rt.texture }, tDepth: { value: rt.depthTexture }, uNear: { value: .1 }, uFar: { value: 120 }, uPx: { value: new THREE.Vector2() }, uFocus: { value: 3 }, uRange: { value: .3 }, uAp: { value: 1 }, uMax: { value: 12 }, uDbg: { value: DBG ? 1 : 0 } },
+  vertexShader: QV, depthTest: false, depthWrite: false,
+  fragmentShader: `uniform sampler2D tColor;uniform vec2 uPx;uniform float uFocus,uRange,uAp,uMax,uDbg;varying vec2 vUv;${DEPTH}
+    float coc(float z){return clamp((abs(z-uFocus)-uRange)/max(z,.001)*uAp*3.,0.,1.)*uMax;}
+    void main(){
+      float z0=vz(vUv),c0=coc(z0);vec3 col=texture2D(tColor,vUv).rgb;
+      if(uDbg>.5){gl_FragColor=vec4(fract(z0/2.),c0/uMax,0.,1.);return;}
+      if(c0<.6){gl_FragColor=vec4(col,1.);return;}
+      vec3 acc=vec3(0.);float ws=0.;
+      for(int i=0;i<${TAPS};i++){
+        float r=sqrt((float(i)+.5)/${TAPS}.)*c0,a=float(i)*2.39996;
+        vec2 uv=vUv+vec2(cos(a),sin(a)*1.25)*r*uPx;
+        vec3 s=texture2D(tColor,uv).rgb;float zs=vz(uv);float cs=zs>z0?c0:coc(zs);
+        float w=smoothstep(r-1.5,r+.5,cs);float l=dot(s,vec3(.2126,.7152,.0722));w*=1.+2.2*l*l;
+        acc+=s*w;ws+=w;}
+      gl_FragColor=vec4(ws>0.?acc/ws:col,1.);}`
+});
+const bright = new THREE.ShaderMaterial({
+  uniforms: { tD: { value: rtD.texture }, uThr: { value: .85 } }, vertexShader: QV, depthTest: false, depthWrite: false,
+  fragmentShader: `uniform sampler2D tD;uniform float uThr;varying vec2 vUv;void main(){vec3 c=texture2D(tD,vUv).rgb;float l=dot(c,vec3(.2126,.7152,.0722));gl_FragColor=vec4(c*smoothstep(uThr,uThr+1.3,l)+c*.04,1.);}`
+});
+const blur = new THREE.ShaderMaterial({
+  uniforms: { tD: { value: null }, uDir: { value: new THREE.Vector2() } }, vertexShader: QV, depthTest: false, depthWrite: false,
+  fragmentShader: `uniform sampler2D tD;uniform vec2 uDir;varying vec2 vUv;void main(){vec3 c=texture2D(tD,vUv).rgb*.227;
+    c+=(texture2D(tD,vUv+uDir*1.385).rgb+texture2D(tD,vUv-uDir*1.385).rgb)*.316;c+=(texture2D(tD,vUv+uDir*3.231).rgb+texture2D(tD,vUv-uDir*3.231).rgb)*.07;gl_FragColor=vec4(c,1.);}`
+});
+const comp = new THREE.ShaderMaterial({
+  uniforms: { tD: { value: rtD.texture }, tB: { value: bA.texture }, uPx: { value: new THREE.Vector2() }, uBloom: { value: .45 }, uExpo: { value: .95 }, uFade: { value: 1 }, uStreak: { value: 1 }, uSep: { value: .04 }, uZoom: { value: 0 }, uTime: { value: 0 }, uGlitch: { value: 0 }, uGT: { value: 0 } },
+  vertexShader: QV, depthTest: false, depthWrite: false,
+  fragmentShader: `uniform sampler2D tD,tB;uniform vec2 uPx;uniform float uBloom,uExpo,uFade,uStreak,uSep,uZoom,uTime,uGlitch,uGT;varying vec2 vUv;
+    float h1(float x){return fract(sin(x*127.1)*43758.5);}
+    float gh(float n){return fract(sin(n*91.345)*47453.5453);}
+    vec3 T(vec2 p){return texture2D(tD,p).rgb;}
+    vec3 aces(vec3 x){return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14),0.,1.);}
+    void main(){
+      vec2 d=vUv-.5;float e=length(d)*2.,g=uGlitch,ca=.0012*e+.045*g*g;
+      vec2 uv=vUv; float row=floor(vUv.y*72.); uv.x+=(gh(row+floor(uGT*24.))-.5)*.08*g*g*step(.55,gh(row*1.7+floor(uGT*12.))); // CRT rows tearing sideways
+      vec3 c=vec3(0.); for(int i=-3;i<=3;i++){vec2 o=vec2(float(i)*.014*g*(.4+abs(d.x)*2.),0.); c+=vec3(T(uv+o+d*ca+vec2(.012*g,0.)).r,T(uv+o).g,T(uv+o-d*ca-vec2(.012*g,0.)).b);} c/=7.; // prism split + side-weighted motion smear
+      c+=texture2D(tB,vUv).rgb*uBloom;
+      if(uZoom>.001){ // speed vignette: radial zoom blur with a chromatic split, dark edges and flickering rainbow streaks
+        float m=smoothstep(.6,1.3,e)*uZoom;vec3 z=vec3(0.);
+        float jt=h1(dot(gl_FragCoord.xy,vec2(.0137,.0731))+fract(uTime));
+        for(int i=1;i<=10;i++){float k=(float(i)-jt)*.016*m;z+=min(vec3(T(vUv-d*k*1.25).r,T(vUv-d*k).g,T(vUv-d*k*.75).b),vec3(1.2));}
+        c=mix(c,z*.1,clamp(m*1.4,0.,1.));
+        float a=atan(d.y,d.x),id=floor(a*48.),r=h1(id+floor(uTime*14.)*7.31);
+        float line=smoothstep(.95,1.,r)*smoothstep(.9,1.4,e)*(.6+.4*sin(a*480.+uTime*30.));
+        vec3 hue=mix(vec3(1.),.5+.5*cos(6.2832*(h1(id*3.7)+vec3(0.,.33,.67))),.55); // pastel prism
+        c=c*(1.-.45*m)+hue*line*uZoom*.42; // faint smear
+      }
+      vec3 s=vec3(0.);for(int i=1;i<=8;i++){float o=float(i)*uPx.x*12.;float w=exp(-float(i)*.3);s+=w*(max(T(vUv+vec2(o,0.))-1.2,0.)+max(T(vUv-vec2(o,0.))-1.2,0.));}
+      c+=dot(s,vec3(.33))*vec3(1.,.6,.3)*.25*uStreak; // warm anamorphic streak off the bulbs
+      c*=uExpo;
+      // fur fix: 55% luminance-preserving + 45% per-channel ACES (per-channel alone turns brown fur red)
+      float l=dot(c,vec3(.2126,.7152,.0722)),lt=aces(vec3(l)).x;vec3 lp=c*(lt/max(l,1e-4));
+      c=mix(lp,aces(c),.45);
+      l=dot(c,vec3(.2126,.7152,.0722));
+      c=mix(vec3(l),c,.92);c=(c-.5)*1.08+.5;
+      c+=vec3(-.02,.008,.035)*(1.-smoothstep(0.,.5,l)); // cool shadows
+      c=mix(c,vec3(l)*vec3(1.12,.97,.74),uSep); // optional sepia grade (uSep)
+      c=clamp(c,0.,1.);
+      c*=mix(1.,smoothstep(1.05,.2,length(d*vec2(1.,.85))),.6);
+      c+=vec3(.9,.95,1.)*g*g*g*.8; c*=1.-.25*g*step(.5,fract(vUv.y*240.)); // flash residue + glitch scanlines
+      gl_FragColor=vec4(c*uFade,1.);
+      #include <colorspace_fragment>
+    }`
+});
+
+/* ---------- sizing: PS2-era internal resolution (~520 lines), upscaled with image-rendering: pixelated ---------- */
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  const pr = Math.min(devicePixelRatio, 520 / Math.min(w, h), Math.sqrt(2400000 / (w * h)));
+  R.setPixelRatio(pr); R.setSize(w, h, false);
+  const W = Math.max(4, Math.floor(w * pr)), H = Math.max(4, Math.floor(h * pr)); // hidden/zero-size pane: keep the targets valid
+  rt.setSize(W, H); rtD.setSize(W, H); bA.setSize(W >> 2, H >> 2); bB.setSize(W >> 2, H >> 2);
+  dof.uniforms.uPx.value.set(1 / W, 1 / H); comp.uniforms.uPx.value.set(1 / W, 1 / H);
+  dof.uniforms.uMax.value = 12 * pr / 1.5;
+  cam.aspect = w / h; cam.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+/* ---------- camera + render ---------- */
+const ptr = { x: 0, y: 0, cx: 0, cy: 0 }, _look = V3(), _f = V3();
+let focus = 3, clock = 0;
+function updateCamera(dt) {
+  const k = 1 - Math.exp(-dt * 5);
+  if (!REDUCED) { ptr.cx = lerp(ptr.cx, ptr.x, k); ptr.cy = lerp(ptr.cy, ptr.y, k); }
+  const par = camState.par;
+  cam.position.copy(camState.pos);
+  cam.position.x += ptr.cx * .65 * par * .5; cam.position.y += -ptr.cy * .25 * par * .5;
+  const wob = REDUCED ? 0 : .004;
+  cam.position.x += Math.sin(clock * .9) * wob; cam.position.y += Math.sin(clock * 1.3 + 1) * wob + (GAL.sky ? 0 : car.position.y * .7); // rides the suspension a little (not in the sky)
+  _look.copy(camState.look); cam.lookAt(_look); cam.rotateZ(camState.roll);
+  cam.fov = camState.fov * (cam.aspect < 1 ? 1.45 : 1); cam.updateProjectionMatrix();
+  // pull portrait back so the figure fits
+  if (cam.aspect < 1) { _f.subVectors(cam.position, _look).multiplyScalar(.12); cam.position.add(_f); }
+}
+const _hrc = new THREE.Raycaster(), _hv = new THREE.Vector2();
+function renderFrame(dt) {
+  if (RAW) { if (TVI.on && scrU.uLive.value) renderTVFeed(); R.setRenderTarget(null); R.render(TVI.on ? room : scene, cam); return; }
+  if (bones.Head) bones.Head.getWorldPosition(HEAD);
+  let fT = TVI.on && TVI.ph === "pull" && TVI.t < 2.2 ? cam.position.distanceTo(screen.position) : cam.position.distanceTo(HEAD); // TV intro opens focused on the tube
+  if (TVI.on && (TVI.ph === "wait" || (TVI.ph === "pull" && TVI.t > 2.2)) && ptr.seen) { _hrc.setFromCamera(_hv.set(ptr.x, -ptr.y), cam); const h = _hrc.intersectObjects(room.children, true)[0]; if (h) fT = h.distance; } // focus pulls to whatever the cursor hovers
+  focus = lerp(focus, fT, dt > 0 ? 1 - Math.exp(-dt * 6) : 1); // ?hold snaps focus
+  const du = dof.uniforms; du.uNear.value = cam.near; du.uFar.value = cam.far; du.uFocus.value = focus; du.uAp.value = camState.ap; du.uRange.value = .25;
+  comp.uniforms.uBloom.value = .45 * camState.bloom;
+  comp.uniforms.uTime.value = clock; comp.uniforms.uZoom.value = lerp(comp.uniforms.uZoom.value, GAL.sky ? .85 : GAL.on && GAL.t > .5 ? .7 : 0, dt > 0 ? 1 - Math.exp(-dt * 3) : 1); // speed vignette in the gallery
+  if (TVI.ph === 'video') return; // the <video> covers the screen
+  if (TVI.on && scrU.uLive.value) renderTVFeed();
+  R.setRenderTarget(rt); R.render(TVI.on ? room : scene, cam);
+  quad.material = dof; R.setRenderTarget(rtD); R.render(pScene, pCam);
+  quad.material = bright; R.setRenderTarget(bA); R.render(pScene, pCam);
+  const w = bA.width, h = bA.height;
+  for (const [x, y, src, dst] of [[1.2, 0, bA, bB], [0, 1.2, bB, bA], [2.6, 0, bA, bB], [0, 2.6, bB, bA]]) {
+    blur.uniforms.tD.value = src.texture; blur.uniforms.uDir.value.set(x / w, y / h); quad.material = blur; R.setRenderTarget(dst); R.render(pScene, pCam);
+  }
+  quad.material = comp; R.setRenderTarget(null); R.render(pScene, pCam);
+}
+
+/* ---------- loop: clamp dt, pause when hidden ---------- */
+let last = performance.now(), raf = 0, started = false;
+function frame(now) {
+  raf = requestAnimationFrame(frame);
+  let dt = Math.min(.05, (now - last) / 1000); last = now;
+  if (HOLD && started) dt = 0;
+  tick(dt);
+}
+function tick(dt) {
+  clock += dt; const cg = comp.uniforms.uGlitch; if (cg.value > 0) { cg.value = Math.max(0, cg.value - dt * .85); comp.uniforms.uGT.value = clock; }
+  if (TVI.on) { stepTV(dt); holdRemote(); if (TVI.ph !== 'video') stepWorld(dt); } else { stepTravel(dt); stepWorld(dt); stepGallery(dt); }
+  if (mixer) { poseBase(true); mixer.update(dt); poseBase(false); if (TVI.on) stepLegIK(dt); else sit(dt); stepNeck(dt); stepLook(dt); stepBlink(dt); }
+  if (!TVI.on) stepAudio(dt);
+  updateCamera(dt); renderFrame(dt);
+  if (DBG) { cvs.dataset.calls = R.info.render.calls; cvs.dataset.tris = R.info.render.triangles; }
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) { cancelAnimationFrame(raf); SND.ctx?.suspend(); } else { last = performance.now(); raf = requestAnimationFrame(frame); SND.ctx?.resume(); } });
+
+/* ---------- gate + input ---------- */
+const enter = $('enter');
+function ready() {
+  if (!loaded.honk || !loaded.room) return; R.compile(room, cam);
+  const wait = Math.max(0, 2600 - (performance.now() - t0));
+  setTimeout(() => {
+    showProg(); setWord('ENTER'); enter.disabled = false; enter.focus({ preventScroll: true });
+    if (Q.has('shot') || Q.has('tv')) begin(true);
+  }, Q.has('shot') || Q.has('tv') ? 0 : wait);
+}
+function begin(debug) { // intro hand-off point: straight into the drive
+  if (started) return; started = true;
+  $('gate').classList.add('off'); setTimeout(() => swirl?.stop(), 1100); if (debug) $('gate').style.display = 'none';
+  if (Q.has('tv')) { startTV(); tvv.pause(); revealTV(); const T = +Q.get('tv'); if (T > 0) { /* debug jump: run the timeline headless */ TVI.ph = 'wait'; tvEnter(); for (let i = 0; i < T * 30; i++) tick(1 / 30); } }
+  else if (debug || REDUCED) { go(station, true); $('ui').classList.add('on'); }
+  else startTV();
+}
+enter.addEventListener('click', () => { audioInit(); begin(false); });
+$('snd').addEventListener('click', () => { audioInit(); SND.on = !SND.on; tvv.muted = !SND.on || TVI.ph !== 'video'; if (SND.out) SND.out.gain.value = SND.on ? .8 : 0; $('snd').setAttribute('aria-pressed', String(SND.on)); $('snd').setAttribute('aria-label', SND.on ? 'Sound on' : 'Sound off'); });
+const skipVideo = () => { if (TVI.ph === 'video') revealTV(); }; // Skip only exists during the opening video and lands in the TV room
+$('skip').addEventListener('click', skipVideo);
+$('tventer').addEventListener('click', tvEnter);
+document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => { lockUntil = 0; go(+b.dataset.s); }));
+addEventListener('keydown', e => {
+  if (e.key === 'Escape') skipVideo();
+  if (!started || TVI.on) return;
+  if (GAL.sky && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) return showMeme(e.key === 'ArrowRight' ? 1 : -1); // in the gallery ← → browse memes
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') go(station + 1);
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') go(station - 1);
+  if ('123'.includes(e.key)) { lockUntil = 0; go(+e.key - 1); }
+});
+addEventListener('wheel', e => { if (started && Math.abs(e.deltaY) > 8) go(station + Math.sign(e.deltaY)); }, { passive: true });
+let ty0 = null, tx0 = 0;
+addEventListener('touchstart', e => { ty0 = e.touches[0].clientY; tx0 = e.touches[0].clientX; }, { passive: true });
+addEventListener('touchend', e => {
+  if (ty0 === null || !started) return; const d = ty0 - e.changedTouches[0].clientY, dx = tx0 - e.changedTouches[0].clientX; ty0 = null;
+  if (GAL.sky && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(d)) return showMeme(Math.sign(dx)); // gallery: swipe sideways to browse
+  if (Math.abs(d) > 70) go(station + Math.sign(d));
+}, { passive: true });
+$('galPrev').addEventListener('click', () => showMeme(-1)); $('galNext').addEventListener('click', () => showMeme(1));
+for (const ev of ['pointermove', 'pointerdown']) addEventListener(ev, e => { ptr.x = e.clientX / innerWidth * 2 - 1; ptr.y = e.clientY / innerHeight * 2 - 1; ptr.seen = true; });
+document.addEventListener('pointerleave', () => { ptr.seen = false; });
+
+/* ---------- grain ---------- */
+{ const c = document.createElement('canvas'); c.width = c.height = 160; const x = c.getContext('2d'), d = x.createImageData(160, 160);
+  for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+  x.putImageData(d, 0, 0); $('grain').style.background = `url(${c.toDataURL()})`; }
+
+window.__honk = { R, rt, comp, GAL, MEMES, showMeme, ptr, POP, SPIN, SITB, HAND, SEAT, RREST, LAIM, IK, RHOLD, TVI, P, room, SCR, screen, TK, endTV, tvEnter, revealTV, THREE, scene, hero, car, wheel, tiles, traffic, chaser, SND, bones, cam, camState, NECK, LOOK, EYE, ACT, SIT, STATIONS, get mixer() { return mixer; }, get dist() { return dist; }, tick, go, get station() { return station; } };
+updateCamera(0);
+raf = requestAnimationFrame(frame);
