@@ -629,7 +629,7 @@ const at = (f, u, r) => LEDGE.clone().addScaledVector(FWD, f).addScaledVector(RG
 const AK = { // the reference painting's POV: high over his shoulder, looking steeply down the canyon, him big in the lower middle, the ledge on a diagonal
   pov: { pos: at(-1.15, 2.0, 1.05), look: at(18, -14, -7.5), fov: 52 },
 };
-const GLIDE = { a: at(-140, 34, 60), m: at(-34, 14, 30), la: at(-20, 0, 0), fov0: 58, dur: 7.5 }; // a low swooping flight over the rooftops, not a top-down drone // loading: in from the sky, banking down onto him
+const GLIDE = { a: at(-140, 34, 60), m: at(-34, 14, 30), la: at(-20, 0, 0), fov0: 58, dur: 3.75 }; // a low swooping flight over the rooftops, not a top-down drone // loading: in from the sky, banking down onto him
 const LEDGE_YAW = 0; // he faces out over the drop, the way the painting has him
 const INTRO = { on: false, ph: 'off', t: 0, a: null, b: null, bt: 0, dur: 1 };
 function camKey(k, dur) { INTRO.a = { pos: camState.pos.clone(), look: camState.look.clone(), fov: camState.fov }; INTRO.b = AK[k]; INTRO.bt = 0; INTRO.dur = dur; }
