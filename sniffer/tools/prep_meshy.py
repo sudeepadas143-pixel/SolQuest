@@ -108,7 +108,11 @@ print('H', round(H, 3), 'tip', tip_end, 'snout', snoutv, 'arm_x', round(arm_x, 3
 band = []
 for z0 in np.arange(.07 * H, .39 * H, .02 * H):
     m = (co[:, 2] >= z0) & (co[:, 2] < z0 + .02 * H) & (co[:, 1] < 0) & (np.abs(co[:, 0]) < np.abs(co[:, 1]) * 1.2 + .05) & (np.hypot(co[:, 0], co[:, 1]) < .45)
-    if m.sum() > 20: band.append((min(.42, float(np.percentile(np.hypot(co[m, 0], co[m, 1]), 85))) * .965, float(z0 + .01 * H)))
+    mb = (co[:, 2] >= z0) & (co[:, 2] < z0 + .02 * H) & (co[:, 1] > np.abs(co[:, 0]) * .8) & (np.hypot(co[:, 0], co[:, 1]) < .5)
+    rb = float(np.percentile(np.hypot(co[mb, 0], co[mb, 1]), 90)) if mb.sum() > 20 else None
+    if m.sum() > 20:
+        rf = min(.42, float(np.percentile(np.hypot(co[m, 0], co[m, 1]), 85)))
+        band.append((rf * .965, float(z0 + .01 * H), min((rb or rf) * .985, rf * 1.2)))
 fl = [l for l in me.loops]; tex_rgb = None
 robe_rgb = np.median(srgb[(lum > .005)][:0], axis=0) if False else None
 mfront = (co[:, 1] < -.05) & (co[:, 2] > .12 * H) & (co[:, 2] < .45 * H)
@@ -124,9 +128,14 @@ for z0 in zz:
     m = mfront[lv2] & (np.abs(co[lv2, 2] - z0) < .01 * H); lums.append(cl[m].mean() if m.sum() > 10 else 1)
 belt_z = float(zz[int(np.argmin(lums))])
 bmp = bmesh.new(); segs = 72; rings = []
-prof = [(0.0, band[0][1])] + band + [(0.0, band[-1][1])]
-for r, zc in prof:
-    rings.append([bmp.verts.new((r * math.cos(2 * math.pi * k / segs), r * math.sin(2 * math.pi * k / segs), zc)) for k in range(segs)])
+prof = [(0.0, band[0][1], 0.0)] + band + [(0.0, band[-1][1], 0.0)]
+for r, zc, rback in prof:
+    ring = []
+    for k in range(segs):
+        ang = 2 * math.pi * k / segs; sb = math.sin(ang); t = max(0., min(1., (sb - .1) / .5)); t = t * t * (3 - 2 * t)
+        rr = r + (rback - r) * t  # back sector sits just OUTSIDE the measured back surface (hides the ragged cut); the front stays tucked inside
+        ring.append(bmp.verts.new((rr * math.cos(ang), rr * sb, zc)))
+    rings.append(ring)
 for A, B in zip(rings, rings[1:]):
     for k in range(segs): bmp.faces.new((A[k], A[(k + 1) % segs], B[(k + 1) % segs], B[k]))
 bmesh.ops.remove_doubles(bmp, verts=bmp.verts, dist=1e-5); bmesh.ops.recalc_face_normals(bmp, faces=bmp.faces)

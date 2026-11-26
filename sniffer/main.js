@@ -274,6 +274,16 @@ const GAS = createGas(scene, { max: MOBILE ? 180 : 260 });
 GAS.air.set(-SPEED, 0, 0); GAS.setFog(SKY.hor, 40, 130);
 const _bp = V3(), _bd = V3(), _cq = new THREE.Quaternion();
 function buttWorld() { butt.getWorldPosition(_bp); _bd.set(0, 0, -1).applyQuaternion(charG.getWorldQuaternion(_cq)); return _bp; }
+const CLING = createGas(scene, { max: 9 }); CLING.uniforms.uOutline.value = .06;
+const CLING_P = [[0, .34, -.40, .15], [.1, .27, -.42, .12], [-.11, .29, -.41, .12], [.05, .44, -.37, .11], [-.06, .21, -.43, .11], [.15, .38, -.33, .09], [-.15, .4, -.34, .09], [0, .17, -.4, .1], [.02, .52, -.33, .08]];
+for (const [x, y, z, s] of CLING_P) CLING.P.push({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: .22, life: 1e9, s0: s, s1: s, drag: 0, seed: Math.random(), rx: Math.random() * 6, ry: Math.random() * 6, heat: .3, squash: .9, buoy: 0, lx: x, ly: y, lz: z });
+const _cl = V3();
+function stepCling() { // follow his butt every frame, breathing gently
+  charG.updateMatrixWorld(true); CLING.mesh.visible = CLING.hull.visible = !!BONES.body;
+  CLING.P.forEach((p, i) => { _cl.set(p.lx, p.ly, p.lz).applyMatrix4(charG.matrixWorld); p.x = _cl.x; p.y = _cl.y + Math.sin(clock * 3 + i) * .008; p.z = _cl.z;
+    const k = 1 + Math.sin(clock * 4.2 + i * 1.7) * .08; p.s0 = p.s1 = CLING_P[i][3] * CS * k; p.heat = .25 + Math.max(0, Math.sin(clock * 2 + i)) * .2; });
+  CLING.step(0, clock);
+}
 function fartBurst(n = 30, power = 1) { buttWorld(); GAS.burst(_bp, _bd, n, power); RIG.squish = 1; fartSound(power, .35 + power * .35 + R01() * .3); }
 
 /* ================================================================== the rider: procedural pose on the skeleton */
@@ -478,7 +488,7 @@ const INTRO = { on: false, ph: 'off', t: 0, a: null, b: null, bt: 0, dur: 1 };
 function camKey(k, dur) { INTRO.a = { pos: camState.pos.clone(), look: camState.look.clone(), fov: camState.fov }; INTRO.b = AK[k]; INTRO.bt = 0; INTRO.dur = dur; }
 function stepCamKey(dt) { if (!INTRO.b) return; INTRO.bt = Math.min(1, INTRO.bt + dt / INTRO.dur); const k = ease(INTRO.bt); camState.pos.lerpVectors(INTRO.a.pos, INTRO.b.pos, k); camState.look.lerpVectors(INTRO.a.look, INTRO.b.look, k); camState.fov = lerp(INTRO.a.fov, INTRO.b.fov, k); }
 function startIntro() {
-  INTRO.on = true; INTRO.ph = 'pull'; INTRO.t = 0; alley.add(skater); GAS.attach(alley); GAS.air.set(0, 0, 0); GAS.clear(); GAS.setFog(new THREE.Color(0x0b0714), 4, 15); GAS.uniforms.uAmb.value.setRGB(.42, .62, .4);
+  INTRO.on = true; INTRO.ph = 'pull'; INTRO.t = 0; alley.add(skater); GAS.attach(alley); CLING.attach(alley); CLING.setFog(new THREE.Color(0x0b0714), 4, 15); CLING.uniforms.uAmb.value.setRGB(.42, .62, .4); GAS.air.set(0, 0, 0); GAS.clear(); GAS.setFog(new THREE.Color(0x0b0714), 4, 15); GAS.uniforms.uAmb.value.setRGB(.42, .62, .4);
   skater.position.set(0, 0, 0); skater.rotation.set(0, Math.PI / 2, 0); boardG.position.set(-.15, 0, .55); boardG.rotation.set(0, .35, 0);
   charG.position.set(0, 0, -.25); charG.rotation.y = -Math.PI / 2;
   Object.assign(camState, { pos: AK.hole.pos.clone(), look: AK.hole.look.clone(), fov: AK.hole.fov, par: 0, roll: 0, ap: .8 }); camKey('wide', 4.5); sirenFar();
@@ -508,7 +518,7 @@ function stepIntro(dt) {
 const GASOUT = { t: -1 };
 function endIntro() {
   if (!INTRO.on) return; INTRO.on = false; INTRO.ph = 'off'; $('ride').classList.remove('on');
-  scene.add(skater); GAS.attach(scene); GAS.clear(); GAS.air.set(-SPEED, 0, 0); GAS.setFog(SKY.hor, 40, 130); GAS.uniforms.uAmb.value.setRGB(1, 1, 1);
+  scene.add(skater); GAS.attach(scene); CLING.attach(scene); CLING.setFog(SKY.hor, 40, 130); CLING.uniforms.uAmb.value.setRGB(1, 1, 1); GAS.clear(); GAS.air.set(-SPEED, 0, 0); GAS.setFog(SKY.hor, 40, 130); GAS.uniforms.uAmb.value.setRGB(1, 1, 1);
   skater.position.set(0, 0, LANE); skater.rotation.set(0, 0, 0); boardG.position.set(0, 0, 0); boardG.rotation.set(0, 0, 0); charG.position.set(0, DECK, 0); charG.rotation.y = 0;
   RIG.crouch = RIG.armsUp = 0; RIG.headYaw = null; RIG.sniffIdle = 0;
   station = -1; lockUntil = 0; go(0, true); $('ui').classList.add('on'); startChaseAudio();
@@ -572,7 +582,7 @@ function tick(dt) {
   if (GASOUT.t >= 0) { GASOUT.t += dt; cu.uGas.value = Math.max(0, 1 - GASOUT.t / 1.4); if (GASOUT.t > 1.4) GASOUT.t = -1; }
   cu.uZoom.value = lerp(cu.uZoom.value, GAL.sky ? .8 : GAL.on && GAL.t > .7 ? .9 : 0, damp(dt, 3));
   if (INTRO.on) { stepIntro(dt); poseRider(dt, 'alley'); } else { stepTravel(dt); stepStreet(dt); stepGallery(dt); poseRider(dt, GAL.sky ? 'sky' : 'street'); stepAudio(dt); }
-  GAS.step(dt, clock);
+  GAS.step(dt, clock); stepCling();
   updateCamera(dt);
   headTop.getWorldPosition(_hn); focus = lerp(focus, cam.position.distanceTo(_hn), damp(dt, 6));
   post.render(INTRO.on ? alley : scene, cam, { focus, aperture: camState.ap ?? .4, bloom: 1, raw: RAW });
