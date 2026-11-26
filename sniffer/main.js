@@ -393,8 +393,8 @@ CLOUDS.mesh.visible = CLOUDS.hull.visible = false; CLOUDS.uniforms.uOutline.valu
 { seed = 909; for (let i = 0; i < 34; i++) {
   const side = rnd() < .5 ? -1 : 1, z = side * (6 + Math.pow(rnd(), .7) * 50); let y = -14 + rnd() * 24; if (Math.abs(z) < 14 && y > -5 && y < 6) y = rnd() < .5 ? -5 - rnd() * 6 : 6 + rnd() * 5;
   const cx = (rnd() - .5) * 200, w = 2.4 + Math.abs(z) / 60 * 6 + rnd() * 2;
-  for (let k = 0, n = 4 + (rnd() * 4 | 0); k < n; k++) { const u = rnd() * 2 - 1, h = rnd(); CLOUDS.P.push({ bx: cx + u * w, x: 0, y: y + h * w * .35 * (1 - u * u * .6), z: z + (rnd() - .5) * w * .5, vx: 0, vy: 0, vz: 0, age: .2, life: 1e9, s0: 1, s1: w * (.45 + rnd() * .3) * (1 - Math.abs(u) * .3), drag: 0, seed: rnd(), rx: rnd() * 6, ry: rnd() * 6, heat: 0, squash: .7 + rnd() * .2, buoy: 0, by: 0 }); }
-} for (const p of CLOUDS.P) p.by = p.y; }
+  for (let k = 0, n = 4 + (rnd() * 4 | 0); k < n; k++) { const u = rnd() * 2 - 1, h = rnd(); CLOUDS.P.push({ bx: cx + u * w, x: 0, y: y + h * w * .35 * (1 - u * u * .6), z: z + (rnd() - .5) * w * .5, vx: 0, vy: 0, vz: 0, age: .2, life: 1e9, s0: 0, s1: 0, sz: w * (.45 + rnd() * .3) * (1 - Math.abs(u) * .3), drag: 0, seed: rnd(), rx: rnd() * 6, ry: rnd() * 6, heat: 0, squash: .7 + rnd() * .2, buoy: 0, by: 0 }); }
+} for (const p of CLOUDS.P) { p.by = p.y; p.s0 = p.s1 = p.sz; } }
 function stepClouds(shift, lift) { for (const p of CLOUDS.P) { p.x = ((p.bx - shift + 100) % 200 + 200) % 200 - 100; p.y = p.by + lift; p.vx = p.vy = p.vz = 0; } CLOUDS.air.set(0, 0, 0); CLOUDS.step(0, clock); }
 const texLoader = new THREE.TextureLoader(), memeTex = [], memeURL = [];
 function placeholder(i) { const c = document.createElement('canvas'); c.width = c.height = 512; const x = c.getContext('2d'); const g = x.createRadialGradient(256, 230, 20, 256, 256, 360); g.addColorStop(0, '#c3e88a'); g.addColorStop(1, '#2a4a1a'); x.fillStyle = g; x.fillRect(0, 0, 512, 512); x.fillStyle = '#16300c'; x.font = 'bold 220px monospace'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('?', 256, 230); x.fillStyle = '#f2ffe0'; x.font = 'bold 30px monospace'; x.fillText('MEME #' + (i + 1), 256, 400); x.font = '20px monospace'; x.fillText('drop it in memes/', 256, 440); return c; }
@@ -407,7 +407,7 @@ const galFlash = () => { const f = $('flash'); f.classList.remove('go'); void f.
 function setGalUI(on) { const g = $('gal'); g.classList.toggle('on', on); g.setAttribute('aria-hidden', String(!on)); g.toggleAttribute('inert', !on); }
 function galCaption() { const m = MEMES[GAL.idx], cap = $('galCap'), b = document.createElement('b'); b.textContent = m.name; cap.replaceChildren(`${GAL.idx + 1}/${MEMES.length} · It's `, b, `. ${m.ask}`); }
 function startGallery() { Object.assign(GAL, { on: true, t: 0, sky: false, ui: 0, fly: 0, launched: false }); galCaption(); }
-function setSky(on) { SUN.set(on ? -.55 : .86, on ? .3 : .12, on ? .78 : -.5).normalize(); const P = on ? SKY_G : SKY; skyU.uHor.value.copy(P.hor); skyU.uMid.value.copy(P.mid); skyU.uTop.value.copy(P.top); scene.fog.far = on ? 400 : 130; GAS.setFog(P.hor, on ? 60 : 40, on ? 300 : 130); fill.intensity = on ? 1.6 : .6; }
+function setSky(on) { SUN.set(on ? -.55 : .86, on ? .3 : .12, on ? .78 : -.5).normalize(); const P = on ? SKY_G : SKY; skyU.uHor.value.copy(P.hor); skyU.uMid.value.copy(P.mid); skyU.uTop.value.copy(P.top); scene.fog.far = on ? 400 : 130; GAS.setFog(P.hor, on ? 60 : 40, on ? 300 : 130); fill.intensity = on ? 2.6 : .6; }
 function endGallery() {
   $('galImg').classList.remove('on'); GAL.hov = 0; if (!GAL.on) return; const wasSky = GAL.sky; Object.assign(GAL, { on: false, sky: false, ui: 0 });
   if (wasSky) galFlash(); for (const o of [...STREET, ...traffic, ...cops]) o.visible = true; CLOUDS.mesh.visible = CLOUDS.hull.visible = false; setSky(false);
@@ -423,7 +423,7 @@ function stepGallery(dt) {
     if (t > .7) { const b = clamp((t - .7) / 1.4, 0, 1); RIG.crouch = 0; RIG.armsUp = .9; skater.position.y = 28 * Math.pow(b, 2.2); skater.position.x = 6 * b; skater.rotation.z = .3 * b;
       buttWorld(); for (let i = 0; i < 3; i++) GAS.emit(_bp.x, _bp.y - .1, _bp.z, { vx: (R01() - .5) * 3, vy: -7 - R01() * 5, vz: (R01() - .5) * 3, life: 2, s0: .3, s1: 1.2, drag: 1.1, heat: 1 }); }
     if (t >= 2.1) { GAL.sky = true; galFlash(); travel = null; GAS.air.set(-12, 0, 0); for (const o of [...STREET, ...traffic, ...cops]) o.visible = false; CLOUDS.mesh.visible = CLOUDS.hull.visible = true; setSky(true); GAS.clear();
-      Object.assign(camState, { pos: SKY_CAM.pos.clone(), look: SKY_CAM.look.clone(), fov: SKY_CAM.fov, par: .25, roll: 0, ap: .2 }); }
+      Object.assign(camState, { pos: SKY_CAM.pos.clone(), look: SKY_CAM.look.clone(), fov: SKY_CAM.fov, par: .25, roll: 0, ap: .03 }); }
     return;
   }
   const st = t - 2.1, rise = 1 - Math.pow(1 - clamp(st / 1.5, 0, 1), 3), side = ease(clamp((st - 2) / .8, 0, 1));
