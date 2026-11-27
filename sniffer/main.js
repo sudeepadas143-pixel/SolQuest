@@ -193,7 +193,8 @@ const tiles = Array.from({ length: NT }, (_, i) => buildTile(i));
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const prog = { sn: 0, bd: 0, cop: 0, urb: 0, font: 0 };
 const showProg = () => { const p = Math.round((prog.sn * 35 + prog.bd * 5 + prog.cop * 20 + prog.urb * 25 + prog.font * 15)); $('prog').textContent = p < 100 ? `loading ${p}%` : 'ready'; $('bar').style.width = p + '%'; };
-const load = (url, key) => new Promise((res, rej) => loader.load(url, g => { prog[key] = 1; showProg(); res(g); }, e => { if (e.total) { prog[key] = e.loaded / e.total * .95; showProg(); } }, rej));
+const ASSET_V = '2026-11-27'; // bump when a model changes: the .glb files are cached for a day, so the URL must change
+const load = (url, key) => new Promise((res, rej) => loader.load(url + '?v=' + ASSET_V, g => { prog[key] = 1; showProg(); res(g); }, e => { if (e.total) { prog[key] = e.loaded / e.total * .95; showProg(); } }, rej));
 document.fonts.ready.then(() => { prog.font = 1; showProg(); });
 function retro(root, { shadows = true } = {}) { // nearest-filtered textures everywhere (the PS2 look) + shadows
   root.traverse(o => {
