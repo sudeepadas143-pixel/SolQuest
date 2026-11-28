@@ -193,7 +193,7 @@ const tiles = Array.from({ length: NT }, (_, i) => buildTile(i));
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const prog = { sn: 0, bd: 0, cop: 0, urb: 0, font: 0 };
 const showProg = () => { const p = Math.round((prog.sn * 35 + prog.bd * 5 + prog.cop * 20 + prog.urb * 25 + prog.font * 15)); $('prog').textContent = p < 100 ? `loading ${p}%` : 'ready'; $('bar').style.width = p + '%'; };
-const ASSET_V = '2026-11-27'; // bump when a model changes: the .glb files are cached for a day, so the URL must change
+const ASSET_V = '2026-11-28'; // bump when a model changes: the .glb files are cached for a day, so the URL must change
 const load = (url, key) => new Promise((res, rej) => loader.load(url + '?v=' + ASSET_V, g => { prog[key] = 1; showProg(); res(g); }, e => { if (e.total) { prog[key] = e.loaded / e.total * .95; showProg(); } }, rej));
 document.fonts.ready.then(() => { prog.font = 1; showProg(); });
 function retro(root, { shadows = true } = {}) { // nearest-filtered textures everywhere (the PS2 look) + shadows
@@ -301,6 +301,46 @@ const ptr = { x: 0, y: 0, cx: 0, cy: 0, seen: false };
 const _pq = new THREE.Quaternion(), _rq = new THREE.Quaternion(), _ax = V3();
 function rotW(b, axis, ang) { if (!b || !ang) return; b.parent.getWorldQuaternion(_pq); _rq.setFromAxisAngle(axis, ang); b.quaternion.premultiply(_pq.clone().invert().multiply(_rq).multiply(_pq)); b.updateMatrixWorld(true); }
 let clock = 0, started = false;
+/* ---------- mocap: CC0 motion clips (three.ws catalog, m2m set) retargeted offline onto this rig by tools/retarget_clips.py.
+   Each clip stores, per frame, a world-space rotation change for root/body/head/arms/feet in the character's own frame
+   (Y up, +Z forward) plus the hips offset in body heights. Played with crossfades underneath the procedural layers. */
+const MOVES = { data: null, cur: null, prev: null, fade: 1, fadeT: 0, w: 1, wT: 1 };
+fetch('assets/models/sniffer-moves.json?v=' + ASSET_V).then(r => r.json()).then(d => { MOVES.data = d; }).catch(() => {});
+const MW = { root: .25, body: .6, head: .55, arm_L: .4, arm_R: .4, foot_L: .5, foot_R: .5 }; // stubby, fused body: damp the source motion per bone
+const MPAR = { root: null, body: 'root', head: 'body', arm_L: 'body', arm_R: 'body', foot_L: 'root', foot_R: 'root' };
+function playMove(name, { fade = .25, speed = 1, from = 0, hold = false } = {}) {
+  if (MOVES.cur && MOVES.cur.name === name && !from) return;
+  MOVES.prev = MOVES.cur; MOVES.cur = { name, t: from, speed, hold }; MOVES.fade = Math.max(.001, fade); MOVES.fadeT = MOVES.prev ? 0 : 1;
+}
+function moveWeight(w) { MOVES.wT = w; }
+const _mq = new THREE.Quaternion(), _mq2 = new THREE.Quaternion(), _mqa = new THREE.Quaternion(), _mqb = new THREE.Quaternion(), _mp = new THREE.Vector3(), _mp2 = new THREE.Vector3(), _mcq = new THREE.Quaternion(), _mpq = new THREE.Quaternion();
+function sampleMove(m, bone, outQ, outP) {
+  const c = MOVES.data.clips[m.name]; if (!c) return false; const f = Math.min(c.n - 1.001, Math.max(0, m.t * MOVES.data.fps)), i = f | 0, a = f - i;
+  if (outQ) { const q = c.q[bone], j = i * 4, k = (i + 1) * 4; _mqa.fromArray(q, j); _mqb.fromArray(q, k); outQ.slerpQuaternions(_mqa, _mqb, a); }
+  if (outP) { const j = i * 3, k = (i + 1) * 3; outP.set(c.p[j] + (c.p[k] - c.p[j]) * a, c.p[j + 1] + (c.p[k + 1] - c.p[j + 1]) * a, c.p[j + 2] + (c.p[k + 2] - c.p[j + 2]) * a); }
+  return true;
+}
+function stepMoves(dt) {
+  if (!MOVES.data) return; MOVES.w = lerp(MOVES.w, MOVES.wT, damp(dt, 4)); MOVES.fadeT = Math.min(1, MOVES.fadeT + dt / MOVES.fade);
+  for (const m of [MOVES.cur, MOVES.prev]) { if (!m) continue; const c = MOVES.data.clips[m.name]; if (!c) continue; m.t += dt * m.speed; if (c.loop) m.t %= c.dur; else if (m.t > c.dur) m.t = c.dur; }
+  if (MOVES.fadeT >= 1) MOVES.prev = null;
+}
+function moveDone() { const m = MOVES.cur, c = m && MOVES.data && MOVES.data.clips[m.name]; return !c || (!c.loop && m.t >= c.dur - .02); }
+const _mD = {};
+function applyMoves() { // root → body → head/arms, root → feet: each bone gets its own world delta, minus what its parent already applied
+  if (!MOVES.data || !MOVES.cur || MOVES.w < .01) return;
+  charG.getWorldQuaternion(_mcq); const W = MOVES.w, k = MOVES.fadeT;
+  for (const b of ['root', 'body', 'head', 'arm_L', 'arm_R', 'foot_L', 'foot_R']) {
+    const bone = BONES[b]; if (!bone) continue; if (!sampleMove(MOVES.cur, b, _mq)) continue;
+    if (MOVES.prev && k < 1 && sampleMove(MOVES.prev, b, _mq2)) _mq.copy(_mq2.slerp(_mq, k));
+    _mq.slerp(_mqa.identity(), 1 - W * MW[b]);                                   // per-bone strength
+    const Dw = (_mD[b] ??= new THREE.Quaternion()).copy(_mcq).multiply(_mq).multiply(_mpq.copy(_mcq).invert()); // character frame → world
+    const par = MPAR[b], E = _mq2.copy(Dw); if (par && _mD[par]) E.multiply(_mpq.copy(_mD[par]).invert());       // remove the parent's share
+    bone.parent.getWorldQuaternion(_mpq); bone.quaternion.premultiply(_mqb.copy(_mpq).invert().multiply(E).multiply(_mpq)); bone.updateMatrixWorld(true);
+  }
+  if (sampleMove(MOVES.cur, 'root', null, _mp)) { if (MOVES.prev && k < 1 && sampleMove(MOVES.prev, 'root', null, _mp2)) _mp.lerpVectors(_mp2, _mp, k);
+    charG.position.y += Math.max(_mp.y, -.18) * 1.137 * CS * .3 * W; charG.position.z += _mp.z * 1.137 * CS * .15 * W; charG.updateMatrixWorld(true); } // hips dip and rise, scaled to his stubby legs
+}
 function charAxis(x, y, z) { return _ax.set(x, y, z).applyQuaternion(charG.getWorldQuaternion(_cq)).clone(); }
 function poseRider(dt, mode) {
   if (!BONES.body) return;
@@ -316,6 +356,7 @@ function poseRider(dt, mode) {
   charG.rotation.y = RIG.bodyYaw || 0; // About: body varial to face the camera
   charG.position.y = (mode !== 'alley' || INTRO.ph === 'land') ? DECK + Math.sin(t * 9) * .004 * b : 0; // on the ledge he stands on concrete, not the deck
   charG.updateMatrixWorld(true);
+  applyMoves();
   const X = charAxis(1, 0, 0), Y = charAxis(0, 1, 0), Z = charAxis(0, 0, 1);
   let yaw = mode === 'alley' ? (RIG.headYaw ?? 0) : station === ST_ABOUT ? -.1 : .45, pitch = 0; // riding: the head turns to look down the road (the mask is fully head-weighted, so it turns cleanly)
   if (mode !== 'alley' && ptr.seen) { yaw += ptr.cx * .22; pitch += ptr.cy * .08; }
@@ -388,7 +429,8 @@ function stepAboutTrick(dt) {
   }
   if (t0 < .76) { skater.position.y = 0; boardG.rotation.y = 0; RIG.bodyYaw = ABT.y1; RIG.armsUp = RIG.flail = 0; RIG.stv = -7; RIG.squish = .7; clack(1);
     if (ABT.dir > 0) { RIG.sniff = 0; RIG.sniffed = false; } }
-  if (ABT.dir > 0) RIG.wave = clamp((t - .95) / .2, 0, 1) * clamp((2.9 - t) / .3, 0, 1); // hello!
+  if (ABT.dir > 0 && t0 < .9 && t >= .9) { playMove('greet', { fade: .25, speed: 1.3 }); moveWeight(.9); }
+  if (ABT.dir > 0) RIG.wave = clamp((t - .95) / .2, 0, 1) * clamp((2.9 - t) / .3, 0, 1) * .35; // a little extra flap on top of the greeting clip
   if (t > 3) { ABT.t = -1; RIG.wave = 0; }
 }
 function aboutTrick(dir) { ABT.t = 0; ABT.dir = dir; ABT.y0 = RIG.bodyYaw || 0; ABT.y1 = dir > 0 ? ABT.YAW : RIDE_YAW; RIG.wave = 0; }
@@ -453,9 +495,10 @@ const _gx = V3(), _gy = V3(), _gz = V3(), _gp = V3(), _gq = new THREE.Quaternion
 const galFlash = () => { const f = $('flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); };
 function setGalUI(on) { const g = $('gal'); g.classList.toggle('on', on); g.setAttribute('aria-hidden', String(!on)); g.toggleAttribute('inert', !on); }
 function galCaption() {} // the meme gallery has no words: just the pictures
-function startGallery() { Object.assign(GAL, { on: true, t: 0, sky: false, ui: 0, fly: 0, launched: false }); galCaption(); }
+function startGallery() { Object.assign(GAL, { on: true, t: 0, sky: false, ui: 0, fly: 0, launched: false }); galCaption(); playMove('victory', { fade: .2 }); moveWeight(1); }
 function setSky(on) { SUN.set(on ? -.55 : .86, on ? .3 : .12, on ? .78 : -.5).normalize(); const P = on ? SKY_G : SKY; scene.fog.color.copy(P.hor); skyU.uHor.value.copy(P.hor); skyU.uMid.value.copy(P.mid); skyU.uTop.value.copy(P.top); scene.fog.far = on ? 400 : 130; GAS.setFog(P.hor, on ? 60 : 40, on ? 300 : 130); fill.intensity = on ? 2.6 : .6; }
 function endGallery() {
+  playMove('crouch', { fade: .4 }); moveWeight(.55);
   $('galImg').classList.remove('on'); GAL.hov = 0; if (!GAL.on) return; const wasSky = GAL.sky; Object.assign(GAL, { on: false, sky: false, ui: 0 });
   if (wasSky) galFlash(); for (const o of [...STREET, ...traffic, ...cops]) o.visible = true; CLOUDS.mesh.visible = CLOUDS.hull.visible = false; setSky(false);
   GAS.air.set(-SPEED, 0, 0); GAS.clear(); skater.position.set(0, 0, LANE); skater.rotation.set(0, 0, 0, 'XYZ'); RIG.crouch = RIG.armsUp = 0; charG.position.x = 0;
@@ -469,7 +512,7 @@ function stepGallery(dt) {
     if (t > .7 && !GAL.launched) { GAL.launched = true; fartBurst(70, 2.2); megaFart(); for (const c of cops) c.userData.gas = 1; }
     if (t > .7) { const b = clamp((t - .7) / 1.4, 0, 1); RIG.crouch = 0; RIG.armsUp = .9; skater.position.y = 28 * Math.pow(b, 2.2); skater.position.x = 6 * b; skater.rotation.z = .3 * b;
       buttWorld(); for (let i = 0; i < 3; i++) GAS.emit(_bp.x, _bp.y - .1, _bp.z, { vx: (R01() - .5) * 3, vy: -7 - R01() * 5, vz: (R01() - .5) * 3, life: 2, s0: .3, s1: 1.2, drag: 1.1, heat: 1 }); }
-    if (t >= 2.1) { GAL.sky = true; galFlash(); travel = null; GAS.air.set(-12, 0, 0); for (const o of [...STREET, ...traffic, ...cops]) o.visible = false; CLOUDS.mesh.visible = CLOUDS.hull.visible = true; setSky(true); GAS.clear();
+    if (t >= 2.1) { GAL.sky = true; playMove('cheer', { fade: .3, speed: .8 }); galFlash(); travel = null; GAS.air.set(-12, 0, 0); for (const o of [...STREET, ...traffic, ...cops]) o.visible = false; CLOUDS.mesh.visible = CLOUDS.hull.visible = true; setSky(true); GAS.clear();
       Object.assign(camState, { pos: SKY_CAM.pos.clone(), look: SKY_CAM.look.clone(), fov: SKY_CAM.fov, par: .25, roll: 0, ap: .03 }); }
     return;
   }
@@ -636,7 +679,7 @@ const INTRO = { on: false, ph: 'off', t: 0, a: null, b: null, bt: 0, dur: 1 };
 function camKey(k, dur) { INTRO.a = { pos: camState.pos.clone(), look: camState.look.clone(), fov: camState.fov }; INTRO.b = AK[k]; INTRO.bt = 0; INTRO.dur = dur; }
 function stepCamKey(dt) { if (!INTRO.b) return; INTRO.bt = Math.min(1, INTRO.bt + dt / INTRO.dur); const k = ease(INTRO.bt); camState.pos.lerpVectors(INTRO.a.pos, INTRO.b.pos, k); camState.look.lerpVectors(INTRO.a.look, INTRO.b.look, k); camState.fov = lerp(INTRO.a.fov, INTRO.b.fov, k); }
 function startIntro() {
-  INTRO.on = true; INTRO.ph = 'glide'; INTRO.t = 0; roof.add(skater); GAS.attach(roof); CLING.attach(roof);
+  INTRO.on = true; INTRO.ph = 'glide'; INTRO.t = 0; playMove('idle', { fade: .01 }); moveWeight(1); roof.add(skater); GAS.attach(roof); CLING.attach(roof);
   for (const S of [GAS, CLING]) { S.setFog(HAZE, 220, 820); S.uniforms.uAmb.value.setRGB(1, 1, 1); } GAS.air.set(.6, 0, -.4); GAS.clear();
   skater.position.copy(LEDGE); skater.rotation.set(0, FACE + LEDGE_YAW, 0, 'YXZ'); streetBoard.rotation.y = FACE; boardG.visible = false; charG.position.set(0, 0, 0); charG.rotation.set(0, 0, 0);
   Object.assign(camState, { pos: GLIDE.a.clone(), look: GLIDE.la.clone(), fov: GLIDE.fov0, par: .1, roll: 0, ap: .05 });
@@ -663,22 +706,22 @@ function stepIntro(dt) {
   }
   if (INTRO.ph === 'alert') { // sirens: he snaps round toward the noise, a nervous toot, the camera jolts in
     const k = clamp(t / .9, 0, 1); RIG.headYaw = lerp(RIG.headYaw ?? 0, -.55, damp(dt, 14)); RIG.crouch = .4 * Math.sin(k * Math.PI);
-    if (t - dt <= 0) { RIG.stv = -4; RIG.squish = .6; post.comp.uniforms.uGlitch.value = .25; }
+    if (t - dt <= 0) { RIG.stv = -4; RIG.squish = .6; post.comp.uniforms.uGlitch.value = .25; playMove('startle', { fade: .1, speed: 1.15 }); }
     camState.pos.lerpVectors(INTRO.c0, _fp.copy(AK.pov.pos).lerp(LEDGE, .22), ease(k)).add(_fl.set((R01() - .5) * .04 * (1 - k), (R01() - .5) * .04 * (1 - k), 0));
     camState.look.lerpVectors(INTRO.l0, AK.pov.look, ease(k)); camState.fov = lerp(INTRO.f0v, AK.pov.fov - 4, ease(k)); camState.roll = 0;
-    if (t > .95) { INTRO.ph = 'crouch'; INTRO.t = 0; startMusic(); return; }
+    if (t > .95) { INTRO.ph = 'crouch'; INTRO.t = 0; startMusic(); playMove('jumpStart', { fade: .45, speed: 0 }); return; } // the clip opens crouched: hold that frame as the wind-up
   }
   if (INTRO.ph === 'crouch') { // anticipation: sink, lean back, arms back, hood tip flicks
     const k = ease(clamp(t / .55, 0, 1)); RIG.crouch = .15 + k * .9; RIG.stT = -.2 * k + (k > .9 ? Math.sin(t * 60) * .015 : 0); RIG.armsUp = -k * .5; RIG.headYaw = lerp(RIG.headYaw ?? 0, 0, k);
     skater.rotation.x = -k * .18; skater.rotation.y = FACE + LEDGE_YAW * (1 - ease(clamp(t / .45, 0, 1))); windGust(.5);
-    if (t > .6) { INTRO.ph = 'leap'; INTRO.t = 0; RIG.squish = 0; RIG.stv = 5; RIG.stT = .16; whoosh(1.2); clack(.3); return; }
+    if (t > .6) { INTRO.ph = 'leap'; INTRO.t = 0; if (MOVES.cur) MOVES.cur.speed = 1.06; /* the clip's push-off spans .53 s: match the .5 s leap */ RIG.squish = 0; RIG.stv = 5; RIG.stT = .16; whoosh(1.2); clack(.3); return; }
   }
   if (INTRO.ph === 'leap') { // spring up and out over the edge, body stretched
     const k = clamp(t / .5, 0, 1); RIG.crouch = Math.max(0, 1 - k * 4) * 1.05; RIG.armsUp = lerp(-.5, .85, ease(Math.min(1, k * 2)));
     skater.position.copy(LEDGE).addScaledVector(FWD, k * 3.2).y += Math.sin(k * Math.PI) * 1.5; skater.rotation.x = lerp(-.18, .55, ease(k));
     RIG.stT = lerp(.16, .08, k);
     _fl.copy(skater.position).addScaledVector(FWD, .8).y -= .1; camState.look.lerp(_fl, damp(dt, 12)); _fp.copy(skater.position).addScaledVector(FWD, -3.4).addScaledVector(RGT, 1.1).y += 2.6; camState.pos.lerp(_fp, damp(dt, 3.5)); camState.fov = lerp(camState.fov, 55, damp(dt, 3));
-    if (t >= .5) { INTRO.ph = 'fall'; INTRO.t = 0; INTRO.f0 = skater.position.clone(); INTRO.blend = true; INTRO.cp0 = camState.pos.clone(); INTRO.cl0 = camState.look.clone(); fallSound(); return; }
+    if (t >= .5) { INTRO.ph = 'fall'; INTRO.t = 0; playMove('jumpAir', { fade: .3 }); INTRO.f0 = skater.position.clone(); INTRO.blend = true; INTRO.cp0 = camState.pos.clone(); INTRO.cl0 = camState.look.clone(); fallSound(); return; }
   }
   if (INTRO.ph === 'fall') { // the dive: gravity-accelerated drop between the towers, arms spread, then a forward flip to land feet-first
     const D = 2.5, u = clamp(t / D, 0, 1), f0 = INTRO.f0;
@@ -695,7 +738,7 @@ function stepIntro(dt) {
     if (INTRO.blend) { INTRO.blend = false; _cpo.copy(INTRO.cp0).sub(camState.pos); _clo.copy(INTRO.cl0).sub(camState.look); } // ease out of the leap camera
     const bk = 1 - ease(clamp(t / .45, 0, 1)); camState.pos.addScaledVector(_cpo, bk); camState.look.addScaledVector(_clo, bk); camState.fov = lerp(55, 44, sideK); camState.ap = .2;
     windGust(.4 + u * .8);
-    if (u >= 1) { INTRO.ph = 'land'; INTRO.t = 0; skater.rotation.set(0, FACE, 0); skater.position.copy(LAND); streetBoard.visible = false; boardG.visible = true; RIG.squish = 1; RIG.crouch = 1; RIG.stT = 0; RIG.stv = -6; RIG.flail = 0; RIG.armsUp = .5; landSound(); windGust(.1);
+    if (u >= 1) { INTRO.ph = 'land'; INTRO.t = 0; playMove('jumpLand', { fade: .06, speed: 1.2 }); skater.rotation.set(0, FACE, 0); skater.position.copy(LAND); streetBoard.visible = false; boardG.visible = true; RIG.squish = 1; RIG.crouch = 1; RIG.stT = 0; RIG.stv = -6; RIG.flail = 0; RIG.armsUp = .5; landSound(); windGust(.1);
       for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; GAS.emit(LAND.x + Math.cos(a) * .4, .1, LAND.z + Math.sin(a) * .4, { vx: Math.cos(a) * 3, vy: .4, vz: Math.sin(a) * 3, life: .9, s0: .05, s1: .22, heat: 0, drag: 3 }); } return; }
   }
   if (INTRO.ph === 'land') { // impact squash → recover → first proper fart
@@ -711,6 +754,7 @@ function endIntro() {
   if (!INTRO.on) return; INTRO.on = false; INTRO.ph = 'off'; $('ride').classList.remove('on');
   scene.add(skater); GAS.attach(scene); CLING.attach(scene); CLING.setFog(SKY.hor, 40, 130); CLING.uniforms.uAmb.value.setRGB(1, 1, 1); GAS.clear(); GAS.air.set(-SPEED, 0, 0); GAS.setFog(SKY.hor, 40, 130); GAS.uniforms.uAmb.value.setRGB(1, 1, 1);
   skater.position.set(0, 0, LANE); skater.rotation.set(0, 0, 0, 'XYZ'); boardG.position.set(0, 0, 0); boardG.rotation.set(0, 0, 0); boardG.visible = true; charG.position.set(0, DECK, 0); charG.rotation.set(0, 0, 0);
+  playMove('crouch', { fade: .5 }); moveWeight(.55); // riding: a loose, knees-bent skate stance
   RIG.crouch = RIG.armsUp = RIG.flail = 0; RIG.stT = RIG.st = RIG.stv = 0; RIG.headYaw = null; RIG.sniffIdle = 0; windStop();
   station = -1; lockUntil = 0; go(0, true); $('ui').classList.add('on'); startChaseAudio();
   post.comp.uniforms.uGlitch.value = 1; post.comp.uniforms.uGas.value = 1; GASOUT.t = 0;
@@ -813,6 +857,7 @@ function tick(dt) {
   const cu = post.comp.uniforms; if (cu.uGlitch.value > 0) cu.uGlitch.value = Math.max(0, cu.uGlitch.value - dt * .8); cu.uT.value = clock;
   if (GASOUT.t >= 0) { GASOUT.t += dt; cu.uGas.value = Math.max(0, 1 - GASOUT.t / .5); if (GASOUT.t > .5) GASOUT.t = -1; }
   cu.uZoom.value = lerp(cu.uZoom.value, GAL.sky ? .8 : GAL.on && GAL.t > .7 ? .9 : 0, damp(dt, 3));
+  stepMoves(dt);
   if (INTRO.on) { stepIntro(dt); poseRider(dt, 'alley'); } else { stepTravel(dt); stepStreet(dt); if (!GAL.sky) stepSmog(dt); stepGallery(dt); poseRider(dt, GAL.sky ? 'sky' : 'street'); stepAudio(dt); }
   GAS.step(dt, clock); stepCling();
   updateCamera(dt);
