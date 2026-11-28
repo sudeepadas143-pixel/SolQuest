@@ -738,11 +738,11 @@ function stepIntro(dt) {
     if (INTRO.blend) { INTRO.blend = false; _cpo.copy(INTRO.cp0).sub(camState.pos); _clo.copy(INTRO.cl0).sub(camState.look); } // ease out of the leap camera
     const bk = 1 - ease(clamp(t / .45, 0, 1)); camState.pos.addScaledVector(_cpo, bk); camState.look.addScaledVector(_clo, bk); camState.fov = lerp(55, 44, sideK); camState.ap = .2;
     windGust(.4 + u * .8);
-    if (u >= 1) { INTRO.ph = 'land'; INTRO.t = 0; playMove('jumpLand', { fade: .06, speed: 1.2 }); skater.rotation.set(0, FACE, 0); skater.position.copy(LAND); streetBoard.visible = false; boardG.visible = true; RIG.squish = 1; RIG.crouch = 1; RIG.stT = 0; RIG.stv = -6; RIG.flail = 0; RIG.armsUp = .5; landSound(); windGust(.1);
+    if (u >= 1) { INTRO.ph = 'land'; INTRO.t = 0; playMove('jumpLand', { fade: .06, speed: 1.2 }); moveWeight(.3); MOVES.w = .3; /* the source lands in a deep forward squat: half of it reads right on him */ skater.rotation.set(0, FACE, 0); skater.position.copy(LAND); streetBoard.visible = false; boardG.visible = true; RIG.squish = .6; RIG.crouch = .6; RIG.stT = 0; RIG.stv = -3.5; RIG.flail = 0; RIG.armsUp = .5; landSound(); windGust(.1);
       for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; GAS.emit(LAND.x + Math.cos(a) * .4, .1, LAND.z + Math.sin(a) * .4, { vx: Math.cos(a) * 3, vy: .4, vz: Math.sin(a) * 3, life: .9, s0: .05, s1: .22, heat: 0, drag: 3 }); } return; }
   }
   if (INTRO.ph === 'land') { // impact squash → recover → first proper fart
-    const k = clamp(t / .5, 0, 1); RIG.crouch = (1 - ease(k)) * 1; boardG.rotation.z = Math.sin(k * Math.PI) * -.08;
+    const k = clamp(t / .5, 0, 1); RIG.crouch = (1 - ease(k)) * .6; boardG.rotation.z = Math.sin(k * Math.PI) * -.08;
     camState.pos.lerp(_fp.copy(LAND).addScaledVector(RGT, 4.4).addScaledVector(FWD, -2.8).setY(1.3), damp(dt, 4)); camState.look.lerp(_fl.set(LAND.x, .6, LAND.z), damp(dt, 6));
     if (t > .3 && !INTRO.farted) { INTRO.farted = true; fartBurst(70, 2); sirenFar(); }
     if (t > .55) post.comp.uniforms.uGas.value = clamp((t - .55) / .3, 0, 1);
