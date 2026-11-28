@@ -354,6 +354,7 @@ function poseRider(dt, mode) {
   charG.scale.set(CS * (1 + sq * .5) * w, CS * (1 + st - sq - RIG.crouch * .08), CS * (1 + sq * .5) * w);
   charG.rotation.x = RIG.lean * .3 + RIG.crouch * .1 - .04 + Math.sin(t * 2.2) * .012 * b; // lean the whole toy, not the robe
   charG.rotation.y = RIG.bodyYaw || 0; // About: body varial to face the camera
+  charG.position.z = 0; // reset every frame: the mocap hips offset is added on top and must not accumulate
   charG.position.y = (mode !== 'alley' || INTRO.ph === 'land') ? DECK + Math.sin(t * 9) * .004 * b : 0; // on the ledge he stands on concrete, not the deck
   charG.updateMatrixWorld(true);
   applyMoves();
